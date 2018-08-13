@@ -12,29 +12,26 @@ class Role(Document):
 			frappe.throw(frappe._("Standard roles cannot be renamed"))
 
 	def after_insert(self):
-		# Add role to Administrator
-		if frappe.flags.in_install != "frappe":
-			user = frappe.get_doc("User", "Administrator")
-			user.flags.ignore_permissions = True
-			user.add_roles(self.name)
-	
+		frappe.cache().hdel('roles', 'Administrator')
+
 	def validate(self):
 		if self.disabled:
 			if self.name in ("Guest", "Administrator", "System Manager", "All"):
 				frappe.throw(frappe._("Standard roles cannot be disabled"))
 			else:
-				frappe.db.sql("delete from `tabUserRole` where role = %s", self.name)
+				frappe.db.sql("delete from `tabHas Role` where role = %s", self.name)
 				frappe.clear_cache()
 
 # Get email addresses of all users that have been assigned this role
 def get_emails_from_role(role):
 	emails = []
 
-	users = frappe.get_list("UserRole", filters={"role": role},
+	users = frappe.get_list("Has Role", filters={"role": role, "parenttype": "User"},
 		fields=["parent"])
 
 	for user in users:
-		user_email = frappe.db.get_value("User", user.parent, "email")
-		emails.append(user_email)
-	
+		user_email, enabled = frappe.db.get_value("User", user.parent, ["email", "enabled"])
+		if enabled:
+			emails.append(user_email)
+
 	return emails

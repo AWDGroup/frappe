@@ -1,12 +1,29 @@
 # Copyright (c) 2015, Frappe Technologies Pvt. Ltd. and Contributors
 # MIT License. See license.txt
 
-from __future__ import unicode_literals
+from __future__ import unicode_literals, print_function
+from six.moves import range
 import frappe
 from frappe.utils import cstr
 from frappe.build import html_to_js_template
 import re
+from six import text_type
 
+import io
+
+STANDARD_FIELD_CONVERSION_MAP = {
+	'name': 'Link',
+	'owner': 'Data',
+	'idx': 'Int',
+	'creation': 'Data',
+	'modified': 'Data',
+	'modified_by': 'Data',
+	'_user_tags': 'Data',
+	'_liked_by': 'Data',
+	'_comments': 'Text',
+	'_assign': 'Text',
+	'docstatus': 'Int'
+}
 
 """
 Model utilities, unclassified functions
@@ -29,7 +46,7 @@ def set_field_property(filters, key, value):
 	for d in docs:
 		d.get('fields', filters)[0].set(key, value)
 		d.save()
-		print 'Updated {0}'.format(d.name)
+		print('Updated {0}'.format(d.name))
 
 	frappe.db.commit()
 
@@ -41,7 +58,7 @@ def render_include(content):
 	content = cstr(content)
 
 	# try 5 levels of includes
-	for i in xrange(5):
+	for i in range(5):
 		if "{% include" in content:
 			paths = re.findall(r'''{% include\s['"](.*)['"]\s%}''', content)
 			if not paths:
@@ -49,8 +66,8 @@ def render_include(content):
 
 			for path in paths:
 				app, app_path = path.split('/', 1)
-				with open(frappe.get_app_path(app, app_path), 'r') as f:
-					include = unicode(f.read(), 'utf-8')
+				with io.open(frappe.get_app_path(app, app_path), 'r', encoding = 'utf-8') as f:
+					include = f.read()
 					if path.endswith('.html'):
 						include = html_to_js_template(path, include)
 
@@ -60,3 +77,20 @@ def render_include(content):
 			break
 
 	return content
+
+def get_fetch_values(doctype, fieldname, value):
+	'''Returns fetch value dict for the given object
+
+	:param doctype: Target doctype
+	:param fieldname: Link fieldname selected
+	:param value: Value selected
+	'''
+	out = {}
+	meta = frappe.get_meta(doctype)
+	link_df = meta.get_field(fieldname)
+	for df in meta.get_fields_to_fetch(fieldname):
+		# example shipping_address.gistin
+		link_field, source_fieldname = df.fetch_from.split('.', 1)
+		out[df.fieldname] = frappe.db.get_value(link_df.options, value, source_fieldname)
+
+	return out

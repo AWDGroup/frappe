@@ -6,7 +6,7 @@ import frappe
 from frappe import _
 from frappe.utils import get_request_site_address, encode
 from frappe.model.document import Document
-from urllib import quote
+from six.moves.urllib.parse import quote
 from frappe.website.router import resolve_route
 from frappe.website.doctype.website_theme.website_theme import add_website_theme
 
@@ -59,8 +59,7 @@ class WebsiteSettings(Document):
 	def clear_cache(self):
 		# make js and css
 		# clear web cache (for menus!)
-		from frappe.sessions import clear_cache
-		clear_cache('Guest')
+		frappe.clear_cache(user = 'Guest')
 
 		from frappe.website.render import clear_cache
 		clear_cache()
@@ -80,10 +79,11 @@ def get_website_settings():
 		]
 	})
 
-	settings = frappe.get_doc("Website Settings", "Website Settings")
+	settings = frappe.get_single("Website Settings")
 	for k in ["banner_html", "brand_html", "copyright", "twitter_share_via",
 		"facebook_share", "google_plus_one", "twitter_share", "linked_in_share",
-		"disable_signup", "hide_footer_signup", "head_html"]:
+		"disable_signup", "hide_footer_signup", "head_html", "title_prefix",
+		"navbar_search"]:
 		if hasattr(settings, k):
 			context[k] = settings.get(k)
 
@@ -142,3 +142,6 @@ def get_items(parentfield):
 					break
 	return top_items
 
+@frappe.whitelist(allow_guest=True)
+def is_chat_enabled():
+	return bool(frappe.db.get_single_value('Website Settings', 'chat_enable'))

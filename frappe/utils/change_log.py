@@ -2,11 +2,12 @@
 # MIT License. See license.txt
 
 from __future__ import unicode_literals
-import os
-import json
+from six.moves import range
+import json, os
 from semantic_version import Version
 import frappe
 from frappe.utils import cstr
+from frappe.utils.gitutils import get_app_last_commit_ref, get_app_branch
 
 def get_change_log(user=None):
 	if not user: user = frappe.session.user
@@ -54,7 +55,7 @@ def get_change_log_for_app(app, from_version, to_version):
 	# remove pre-release part
 	to_version.prerelease = None
 
-	major_version_folders = ["v{0}".format(i) for i in xrange(from_version.major, to_version.major + 1)]
+	major_version_folders = ["v{0}".format(i) for i in range(from_version.major, to_version.major + 1)]
 	app_change_log = []
 
 	for folder in os.listdir(change_log_folder):
@@ -91,15 +92,21 @@ def get_versions():
 		}"""
 	versions = {}
 	for app in frappe.get_installed_apps(sort=True):
+		app_hooks = frappe.get_hooks(app_name=app)
 		versions[app] = {
-			"title": frappe.get_hooks("app_title", app_name=app)[0],
-			"description": frappe.get_hooks("app_description", app_name=app)[0]
+			"title": app_hooks.get("app_title")[0],
+			"description": app_hooks.get("app_description")[0],
+			"branch": get_app_branch(app)
 		}
+
+		if versions[app]['branch'] != 'master':
+			branch_version = app_hooks.get('{0}_version'.format(versions[app]['branch']))
+			if branch_version:
+				versions[app]['branch_version'] = branch_version[0] + ' ({0})'.format(get_app_last_commit_ref(app))
+
 		try:
 			versions[app]["version"] = frappe.get_attr(app + ".__version__")
 		except AttributeError:
 			versions[app]["version"] = '0.0.1'
 
 	return versions
-
-

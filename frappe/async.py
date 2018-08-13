@@ -9,6 +9,7 @@ import frappe
 import os
 import time
 import redis
+from io import FileIO
 from frappe.utils import get_site_path
 from frappe import conf
 
@@ -46,8 +47,8 @@ def remove_old_task_logs():
 def is_file_old(file_path):
 	return ((time.time() - os.stat(file_path).st_mtime) > TASK_LOG_MAX_AGE)
 
-def publish_progress(percent, title=None, doctype=None, docname=None):
-	publish_realtime('progress', {'percent': percent, 'title': title},
+def publish_progress(percent, title=None, doctype=None, docname=None, description=None):
+	publish_realtime('progress', {'percent': percent, 'title': title, 'description': description},
 		user=frappe.session.user, doctype=doctype, docname=docname)
 
 def publish_realtime(event=None, message=None, room=None,
@@ -90,6 +91,10 @@ def publish_realtime(event=None, message=None, room=None,
 			room = get_doc_room(doctype, docname)
 		else:
 			room = get_site_room()
+	else:
+		# frappe.chat
+		room = get_chat_room(room)
+		# end frappe.chat
 
 	if after_commit:
 		params = [event, message, room]
@@ -109,7 +114,7 @@ def emit_via_redis(event, message, room):
 	try:
 		r.publish('events', frappe.as_json({'event': event, 'message': message, 'room': room}))
 	except redis.exceptions.ConnectionError:
-		# print frappe.get_traceback()
+		# print(frappe.get_traceback())
 		pass
 
 def put_log(line_no, line, task_id=None):
@@ -138,7 +143,7 @@ def get_redis_server():
 	return redis_server
 
 
-class FileAndRedisStream(file):
+class FileAndRedisStream(FileIO):
 	def __init__(self, *args, **kwargs):
 		ret = super(FileAndRedisStream, self).__init__(*args, **kwargs)
 		self.count = 0
@@ -165,6 +170,8 @@ def get_task_log_file_path(task_id, stream_type):
 
 @frappe.whitelist(allow_guest=True)
 def can_subscribe_doc(doctype, docname, sid):
+	if os.environ.get('CI'):
+		return True
 	from frappe.sessions import Session
 	from frappe.exceptions import PermissionError
 	session = Session(None, resume=True).get_session_data()
@@ -191,3 +198,10 @@ def get_site_room():
 
 def get_task_progress_room(task_id):
 	return "".join([frappe.local.site, ":task_progress:", task_id])
+
+# frappe.chat
+def get_chat_room(room):
+	room = ''.join([frappe.local.site, ":room:", room])
+
+	return room
+# end frappe.chat room

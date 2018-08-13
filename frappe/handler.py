@@ -10,13 +10,24 @@ import frappe.sessions
 import frappe.utils.file_manager
 import frappe.desk.form.run_method
 from frappe.utils.response import build_response
+from werkzeug.wrappers import Response
+from six import string_types
 
 def handle():
 	"""handle request"""
 	cmd = frappe.local.form_dict.cmd
+	data = None
 
 	if cmd!='login':
-		execute_cmd(cmd)
+		data = execute_cmd(cmd)
+
+	if data:
+		if isinstance(data, Response):
+			# method returns a response object, pass it on
+			return data
+
+		# add the response to `message` label
+		frappe.response['message'] = data
 
 	return build_response("json")
 
@@ -29,8 +40,11 @@ def execute_cmd(cmd, from_async=False):
 
 	try:
 		method = get_attr(cmd)
-	except:
-		frappe.respond_as_web_page(title='Invalid Method', html='Method not found',
+	except Exception as e:
+		if frappe.local.conf.developer_mode:
+			raise e
+		else:
+			frappe.respond_as_web_page(title='Invalid Method', html='Method not found',
 			indicator_color='red', http_status_code=404)
 		return
 
@@ -39,11 +53,8 @@ def execute_cmd(cmd, from_async=False):
 
 	is_whitelisted(method)
 
-	ret = frappe.call(method, **frappe.form_dict)
+	return frappe.call(method, **frappe.form_dict)
 
-	# returns with a message
-	if ret:
-		frappe.response['message'] = ret
 
 def is_whitelisted(method):
 	# check if whitelisted
@@ -56,7 +67,7 @@ def is_whitelisted(method):
 			# strictly sanitize form_dict
 			# escapes html characters like <> except for predefined tags like a, b, ul etc.
 			for key, value in frappe.form_dict.items():
-				if isinstance(value, basestring):
+				if isinstance(value, string_types):
 					frappe.form_dict[key] = frappe.utils.sanitize_html(value)
 
 	else:
@@ -95,6 +106,8 @@ def run_custom_method(doctype, name, custom_method):
 
 @frappe.whitelist()
 def uploadfile():
+	ret = None
+
 	try:
 		if frappe.form_dict.get('from_form'):
 			try:
@@ -110,6 +123,7 @@ def uploadfile():
 				ret = method()
 	except Exception:
 		frappe.errprint(frappe.utils.get_traceback())
+		frappe.response['http_status_code'] = 500
 		ret = None
 
 	return ret
@@ -124,6 +138,6 @@ def get_attr(cmd):
 	frappe.log("method:" + cmd)
 	return method
 
-@frappe.whitelist()
+@frappe.whitelist(allow_guest = True)
 def ping():
 	return "pong"

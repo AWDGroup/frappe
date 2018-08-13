@@ -12,9 +12,6 @@ rename_map = {
 	"Email Alert": [
 		["email_alert_recipients", "recipients"]
 	],
-	"Event": [
-		["event_roles", "roles"]
-	],
 	"Workflow": [
 		["workflow_document_states", "states"],
 		["workflow_transitions", "transitions"]
@@ -23,7 +20,7 @@ rename_map = {
 
 def execute():
 	frappe.reload_doc("custom", "doctype", "customize_form")
-	frappe.reload_doc("email", "doctype", "email_alert")
+	frappe.reload_doc("email", "doctype", "notification")
 	frappe.reload_doc("desk", "doctype", "event")
 	frappe.reload_doc("workflow", "doctype", "workflow")
 

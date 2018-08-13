@@ -17,6 +17,11 @@ def get_data():
 					"type": "doctype",
 					"name": "Role",
 					"description": _("User Roles")
+				},
+				{
+					"type": "doctype",
+					"name": "Role Profile",
+					"description": _("Role Profile")
 				}
 			]
 		},
@@ -32,18 +37,16 @@ def get_data():
 					"description": _("Set Permissions on Document Types and Roles")
 				},
 				{
-					"type": "page",
-					"name": "user-permissions",
-					"label": _("User Permissions Manager"),
-					"icon": "fa fa-shield",
-					"description": _("Set Permissions per User")
+					"type": "doctype",
+					"name": "User Permission",
+					"label": _("User Permissions"),
+					"icon": "fa fa-lock",
+					"description": _("Restrict user for specific document")
 				},
 				{
-					"type": "page",
-					"name": "modules_setup",
-					"label": _("Show / Hide Modules"),
-					"icon": "fa fa-upload",
-					"description": _("Show or hide modules globally.")
+					"type": "doctype",
+					"name": "Role Permission for Page and Report",
+					"description": _("Set custom roles for page and report")
 				},
 				{
 					"type": "report",
@@ -83,6 +86,13 @@ def get_data():
 					"name": "Error Snapshot",
 					"description": _("Log of error during requests.")
 				},
+				{
+					"type": "doctype",
+					"name": "Domain Settings",
+					"label": _("Domain Settings"),
+					"description": _("Enable / Disable Domains"),
+					"hide_count": True
+				},
 			]
 		},
 		{
@@ -90,11 +100,18 @@ def get_data():
 			"icon": "fa fa-th",
 			"items": [
 				{
-					"type": "page",
-					"name": "data-import-tool",
-					"label": _("Import / Export Data"),
-					"icon": "fa fa-upload",
-					"description": _("Import / Export Data from .csv files.")
+					"type": "doctype",
+					"name": "Data Import",
+					"label": _("Import Data"),
+					"icon": "octicon octicon-cloud-upload",
+					"description": _("Import Data from CSV / Excel files.")
+				},
+				{
+					"type": "doctype",
+					"name": "Data Export",
+					"label": _("Export Data"),
+					"icon": "octicon octicon-cloud-upload",
+					"description": _("Export Data in CSV / Excel format.")
 				},
 				{
 					"type": "doctype",
@@ -123,6 +140,12 @@ def get_data():
 					"description": _("List of backups available for download"),
 					"icon": "fa fa-download"
 				},
+				{
+					"type": "doctype",
+					"name": "Deleted Document",
+					"label": _("Deleted Documents"),
+					"description": _("Restore or permanently delete a document.")
+				},
 			]
 		},
 		{
@@ -141,13 +164,13 @@ def get_data():
 				},
 				{
 					"type": "doctype",
-					"name": "Email Alert",
-					"description": _("Setup Email Alert based on various criteria.")
+					"name": "Notification",
+					"description": _("Setup Notifications based on various criteria.")
 				},
 				{
 					"type": "doctype",
-					"name": "Standard Reply",
-					"description": _("Standard replies to common queries.")
+					"name": "Email Template",
+					"description": _("Email Templates for common queries.")
 				},
 				{
 					"type": "doctype",
@@ -162,7 +185,7 @@ def get_data():
 			"items": [
 				{
 					"type": "page",
-					"label": "Print Format Builder",
+					"label": _("Print Format Builder"),
 					"name": "print-format-builder",
 					"description": _("Drag and Drop tool to build and customize Print Formats.")
 				},
@@ -175,6 +198,11 @@ def get_data():
 					"type": "doctype",
 					"name": "Print Format",
 					"description": _("Customized HTML Templates for printing transactions.")
+				},
+				{
+					"type": "doctype",
+					"name": "Print Style",
+					"description": _("Stylesheets for Print Formats")
 				},
 			]
 		},
@@ -196,39 +224,6 @@ def get_data():
 					"type": "doctype",
 					"name": "Workflow Action",
 					"description": _("Actions for workflow (e.g. Approve, Cancel).")
-				},
-			]
-		},
-		{
-			"label": _("Integrations"),
-			"icon": "fa fa-star",
-			"items": [
-				{
-					"type": "page",
-					"name": "applications",
-					"label": _("Application Installer"),
-					"description": _("Install Applications."),
-					"icon": "fa fa-download"
-				},
-				{
-					"type": "doctype",
-					"name": "Social Login Keys",
-					"description": _("Enter keys to enable login via Facebook, Google, GitHub."),
-				},
-				{
-					"type": "doctype",
-					"name": "Integration Service",
-					"description": _("Centralize access to Integrations"),
-				},
-				{
-					"type": "doctype",
-					"name": "OAuth Client",
-					"description": _("Register OAuth Client App"),
-				},
-				{
-					"type": "doctype",
-					"name": "OAuth Provider Settings",
-					"description": _("Settings for OAuth Provider"),
 				},
 			]
 		},
@@ -272,6 +267,18 @@ def get_data():
 
 			]
 		},
+		{
+			"label": _("Applications"),
+			"items":[
+				{
+					"type": "page",
+					"name": "applications",
+					"label": _("Application Installer"),
+					"description": _("Install Applications."),
+					"icon": "fa fa-download"
+				},
+			]
+		}
 	]
 	add_setup_section(data, "frappe", "website", _("Website"), "fa fa-globe")
 	return data

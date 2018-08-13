@@ -1,4 +1,5 @@
 import frappe
+from frappe import _
 from frappe.core.doctype.feedback_request.feedback_request import is_valid_feedback_request
 
 no_cache = True
@@ -7,8 +8,13 @@ def get_context(context):
 	reference_doctype = frappe.form_dict.get("reference_doctype")
 	reference_name = frappe.form_dict.get("reference_name")
 
-	if not all([reference_name, reference_doctype]):
-		return {}
+	if not all([reference_name, reference_doctype]) or \
+		not frappe.db.get_value(reference_doctype, reference_name):
+		
+		return {
+			"is_valid_request": False,
+			"error_message": "Invalid reference doctype and reference name"
+		}
 
 	communications = frappe.get_all("Communication", filters={
 		"reference_doctype": reference_doctype,
@@ -20,20 +26,23 @@ def get_context(context):
 		"reference_doctype": reference_doctype,
 		"reference_name": reference_name,
 		"comment_list": communications,
-		"is_communication": True
+		"is_communication": True,
+		"is_valid_request": True
 	}
 
 @frappe.whitelist(allow_guest=True)
 def accept(key, sender, reference_doctype, reference_name, feedback, rating, fullname):
 	""" save the feedback in communication """
-	if not reference_doctype and not reference_name:
-		frappe.throw("Invalid Reference Doctype, Reference Name")
+	if not reference_doctype and not reference_name or \
+		not frappe.db.get_value(reference_doctype, reference_name):
 
-	if not rating or not feedback:
-		frappe.throw("Please give both Rating and Detailed Feedback")
+		frappe.throw(_("Invalid Reference"))
+
+	if not rating:
+		frappe.throw(_("Please add a rating"))
 
 	if not is_valid_feedback_request(key):
-		frappe.throw("Link is expired")
+		frappe.throw(_("Expired link"))
 
 	try:
 		feedback_request = frappe.db.get_value("Feedback Request", {"key": key})
@@ -41,7 +50,7 @@ def accept(key, sender, reference_doctype, reference_name, feedback, rating, ful
 		communication = frappe.get_doc({
 			"rating": rating,
 			"status": "Closed",
-			"content": feedback,
+			"content": feedback or "",
 			"doctype": "Communication",
 			"sender": sender or "Guest",
 			"sent_or_received": "Received",
@@ -59,5 +68,6 @@ def accept(key, sender, reference_doctype, reference_name, feedback, rating, ful
 		doc.reference_communication = communication.name
 		doc.save(ignore_permissions=True)
 		return True
-	except Exception as e:
-		frappe.throw("Can not submit feedback, Please try again later")
+	except Exception:
+		frappe.log_error()
+		frappe.throw(_("Cannot submit feedback, please try again later"))

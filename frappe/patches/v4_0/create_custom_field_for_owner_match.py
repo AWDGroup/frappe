@@ -1,16 +1,18 @@
 # Copyright (c) 2015, Frappe Technologies Pvt. Ltd. and Contributors
 # MIT License. See license.txt
 
-from __future__ import unicode_literals
+from __future__ import unicode_literals, print_function
 import frappe
-from frappe.core.doctype.custom_field.custom_field import create_custom_field
+from frappe.custom.doctype.custom_field.custom_field import create_custom_field
 
 def execute():
 	if "match" in frappe.db.get_table_columns("DocPerm"):
 		create_custom_field_for_owner_match()
 
 def create_custom_field_for_owner_match():
-	frappe.db.sql("""update `tabDocPerm` set apply_user_permissions=1 where `match`='owner'""")
+	docperm_meta = frappe.get_meta('DocPerm')
+	if docperm_meta.get_field('apply_user_permissions'):
+		frappe.db.sql("""update `tabDocPerm` set apply_user_permissions=1 where `match`='owner'""")
 
 	for dt in frappe.db.sql_list("""select distinct parent from `tabDocPerm`
 		where `match`='owner' and permlevel=0 and parent != 'User'"""):
@@ -18,7 +20,7 @@ def create_custom_field_for_owner_match():
 		# a link field pointing to User already exists
 		if (frappe.db.get_value("DocField", {"parent": dt, "fieldtype": "Link", "options": "User", "default": "__user"})
 			or frappe.db.get_value("Custom Field", {"dt": dt, "fieldtype": "Link", "options": "User", "default": "__user"})):
-			print "User link field already exists for", dt
+			print("User link field already exists for", dt)
 			continue
 
 		fieldname = "{}_owner".format(frappe.scrub(dt))

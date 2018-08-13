@@ -5,13 +5,13 @@ frappe.provide('frappe.utils');
 
 frappe.utils = {
 	get_random: function(len) {
-	    var text = "";
-	    var possible = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+		var text = "";
+		var possible = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 
-	    for( var i=0; i < len; i++ )
-	        text += possible.charAt(Math.floor(Math.random() * possible.length));
+		for( var i=0; i < len; i++ )
+			text += possible.charAt(Math.floor(Math.random() * possible.length));
 
-	    return text;
+		return text;
 	},
 	get_file_link: function(filename) {
 		filename = cstr(filename);
@@ -22,6 +22,9 @@ frappe.utils = {
 		} else {
 			return filename;
 		}
+	},
+	replace_newlines(t) {
+		return t?t.replace(/\n/g, '<br>'):'';
 	},
 	is_html: function(txt) {
 		if (!txt) return false;
@@ -40,6 +43,14 @@ frappe.utils = {
 	},
 	is_md: function() {
 		return $(document).width() < 1199 && $(document).width() >= 991;
+	},
+	is_json: function(str) {
+		try {
+			JSON.parse(str);
+		} catch (e) {
+			return false;
+		}
+		return true;
 	},
 	strip_whitespace: function(html) {
 		return (html || "").replace(/<p>\s*<\/p>/g, "").replace(/<br>(\s*<br>\s*)+/g, "<br><br>");
@@ -105,12 +116,12 @@ frappe.utils = {
 		}
 
 		// already there
-		if(y==$('body').scrollTop()) {
+		if(y==$('html, body').scrollTop()) {
 			return;
 		}
 
 		if (animate!==false) {
-			$("body").animate({ scrollTop: y });
+			$("html, body").animate({ scrollTop: y });
 		} else {
 			$(window).scrollTop(y);
 		}
@@ -122,7 +133,7 @@ frappe.utils = {
 			return [dict[filters]]
 		}
 		$.each(dict, function(i, d) {
-			for(key in filters) {
+			for(var key in filters) {
 				if($.isArray(filters[key])) {
 					if(filters[key][0]=="in") {
 						if(filters[key][1].indexOf(d[key])==-1)
@@ -185,20 +196,19 @@ frappe.utils = {
 			me.intro_area = null;
 		}
 	},
-	set_footnote: function(me, wrapper, txt) {
-		if(!me.footnote_area) {
-			me.footnote_area = $('<div class="text-muted footnote-area">')
+	set_footnote: function(footnote_area, wrapper, txt) {
+		if(!footnote_area) {
+			footnote_area = $('<div class="text-muted footnote-area level">')
 				.appendTo(wrapper);
 		}
 
 		if(txt) {
-			if(txt.search(/<p>/)==-1) txt = '<p>' + txt + '</p>';
-			me.footnote_area.html(txt);
+			footnote_area.html(txt);
 		} else {
-			me.footnote_area.remove();
-			me.footnote_area = null;
+			footnote_area.remove();
+			footnote_area = null;
 		}
-		return me.footnote_area;
+		return footnote_area;
 	},
 	get_args_dict_from_url: function(txt) {
 		var args = {};
@@ -241,7 +251,6 @@ frappe.utils = {
 				break;
 			default:
 				return false;
-				break;
 		}
 
 		// test regExp if not null
@@ -287,7 +296,7 @@ frappe.utils = {
 		};
 
 		if(!compare_type)
-		 	compare_type = typeof list[0][key]==="string" ? "string" : "number";
+			compare_type = typeof list[0][key]==="string" ? "string" : "number";
 
 		list.sort(sort_fn[compare_type]);
 
@@ -348,20 +357,20 @@ frappe.utils = {
 		if (!arr1 || !arr2) {
 			return false;
 		}
-	    if (arr1.length != arr2.length) {
+		if (arr1.length != arr2.length) {
 			return false;
 		}
-	    for (var i = 0; i < arr1.length; i++) {
-	        if ($.isArray(arr1[i])) {
-	            if (!frappe.utils.arrays_equal(arr1[i], arr2[i])) {
+		for (var i = 0; i < arr1.length; i++) {
+			if ($.isArray(arr1[i])) {
+				if (!frappe.utils.arrays_equal(arr1[i], arr2[i])) {
 					return false;
 				}
-	        }
-	        else if (arr1[i] !== arr2[i]) {
+			}
+			else if (arr1[i] !== arr2[i]) {
 				return false;
 			}
-	    }
-	    return true;
+		}
+		return true;
 	},
 
 	intersection: function(a, b) {
@@ -410,13 +419,13 @@ frappe.utils = {
 			var tempH = tempImg.height;
 			if (tempW > tempH) {
 				if (tempW > max_width) {
-				   tempH *= max_width / tempW;
-				   tempW = max_width;
+					tempH *= max_width / tempW;
+					tempW = max_width;
 				}
 			} else {
 				if (tempH > max_height) {
-				   tempW *= max_height / tempH;
-				   tempH = max_height;
+					tempW *= max_height / tempH;
+					tempH = max_height;
 				}
 			}
 
@@ -430,114 +439,95 @@ frappe.utils = {
 		}
 	},
 
-    csv_to_array: function (strData, strDelimiter) {
-        // Check to see if the delimiter is defined. If not,
-        // then default to comma.
-        strDelimiter = (strDelimiter || ",");
+	csv_to_array: function (strData, strDelimiter) {
+		// Check to see if the delimiter is defined. If not,
+		// then default to comma.
+		strDelimiter = (strDelimiter || ",");
 
-        // Create a regular expression to parse the CSV values.
-        var objPattern = new RegExp(
-            (
-                // Delimiters.
-                "(\\" + strDelimiter + "|\\r?\\n|\\r|^)" +
+		// Create a regular expression to parse the CSV values.
+		var objPattern = new RegExp(
+			(
+				// Delimiters.
+				"(\\" + strDelimiter + "|\\r?\\n|\\r|^)" +
 
-                // Quoted fields.
-                "(?:\"([^\"]*(?:\"\"[^\"]*)*)\"|" +
+				// Quoted fields.
+				"(?:\"([^\"]*(?:\"\"[^\"]*)*)\"|" +
 
-                // Standard fields.
-                "([^\"\\" + strDelimiter + "\\r\\n]*))"
-            ),
-            "gi"
-            );
-
-
-        // Create an array to hold our data. Give the array
-        // a default empty first row.
-        var arrData = [[]];
-
-        // Create an array to hold our individual pattern
-        // matching groups.
-        var arrMatches = null;
+				// Standard fields.
+				"([^\"\\" + strDelimiter + "\\r\\n]*))"
+			),
+			"gi"
+			);
 
 
-        // Keep looping over the regular expression matches
-        // until we can no longer find a match.
-        while (arrMatches = objPattern.exec( strData )){
+		// Create an array to hold our data. Give the array
+		// a default empty first row.
+		var arrData = [[]];
 
-            // Get the delimiter that was found.
-            var strMatchedDelimiter = arrMatches[ 1 ];
-
-            // Check to see if the given delimiter has a length
-            // (is not the start of string) and if it matches
-            // field delimiter. If id does not, then we know
-            // that this delimiter is a row delimiter.
-            if (
-                strMatchedDelimiter.length &&
-                strMatchedDelimiter !== strDelimiter
-                ){
-
-                // Since we have reached a new row of data,
-                // add an empty row to our data array.
-                arrData.push( [] );
-
-            }
-
-            var strMatchedValue;
-
-            // Now that we have our delimiter out of the way,
-            // let's check to see which kind of value we
-            // captured (quoted or unquoted).
-            if (arrMatches[ 2 ]){
-
-                // We found a quoted value. When we capture
-                // this value, unescape any double quotes.
-                strMatchedValue = arrMatches[ 2 ].replace(
-                    new RegExp( "\"\"", "g" ),
-                    "\""
-                    );
-
-            } else {
-
-                // We found a non-quoted value.
-                strMatchedValue = arrMatches[ 3 ];
-
-            }
+		// Create an array to hold our individual pattern
+		// matching groups.
+		var arrMatches = null;
 
 
-            // Now that we have our value string, let's add
-            // it to the data array.
-            arrData[ arrData.length - 1 ].push( strMatchedValue );
-        }
+		// Keep looping over the regular expression matches
+		// until we can no longer find a match.
+		while ((arrMatches = objPattern.exec( strData ))){
 
-        // Return the parsed data.
-        return( arrData );
-    },
+			// Get the delimiter that was found.
+			var strMatchedDelimiter = arrMatches[ 1 ];
 
-	warn_page_name_change: function(frm) {
-		frappe.msgprint("Note: Changing the Page Name will break previous URL to this page.");
+			// Check to see if the given delimiter has a length
+			// (is not the start of string) and if it matches
+			// field delimiter. If id does not, then we know
+			// that this delimiter is a row delimiter.
+			if (
+				strMatchedDelimiter.length &&
+				strMatchedDelimiter !== strDelimiter
+				){
+
+				// Since we have reached a new row of data,
+				// add an empty row to our data array.
+				arrData.push( [] );
+
+			}
+
+			var strMatchedValue;
+
+			// Now that we have our delimiter out of the way,
+			// let's check to see which kind of value we
+			// captured (quoted or unquoted).
+			if (arrMatches[ 2 ]){
+
+				// We found a quoted value. When we capture
+				// this value, unescape any double quotes.
+				strMatchedValue = arrMatches[ 2 ].replace(
+					new RegExp( "\"\"", "g" ),
+					"\""
+					);
+
+			} else {
+
+				// We found a non-quoted value.
+				strMatchedValue = arrMatches[ 3 ];
+
+			}
+
+
+			// Now that we have our value string, let's add
+			// it to the data array.
+			arrData[ arrData.length - 1 ].push( strMatchedValue );
+		}
+
+		// Return the parsed data.
+		return( arrData );
 	},
 
-	if_notify_permitted: function(callback) {
-		if (Notify.needsPermission) {
-			Notify.requestPermission(callback);
-		} else {
-			callback && callback();
-		}
+	warn_page_name_change: function(frm) {
+		frappe.msgprint(__("Note: Changing the Page Name will break previous URL to this page."));
 	},
 
 	notify: function(subject, body, route, onclick) {
-		if(!route) route = "messages";
-		if(!onclick) onclick = function() {
-			frappe.set_route(route);
-		}
-
-		frappe.utils.if_notify_permitted(function() {
-			var notify = new Notify(subject, {
-			    body: body.replace(/<[^>]*>/g, ""),
-			    notifyClick: onclick
-			});
-			notify.show();
-		});
+		console.log('push notifications are evil and deprecated');
 	},
 
 	set_title: function(title) {
@@ -556,6 +546,9 @@ frappe.utils = {
 	},
 
 	is_image_file: function(filename) {
+		if (!filename) return false;
+		// url can have query params
+		filename = filename.split('?')[0];
 		return (/\.(gif|jpg|jpeg|tiff|png|svg)$/i).test(filename);
 	},
 
@@ -591,5 +584,81 @@ frappe.utils = {
 		});
 
 		return email_list;
+	},
+	supportsES6: function() {
+		try {
+			new Function("(a = 0) => a");
+			return true;
+		}
+		catch (err) {
+			return false;
+		}
+	}(),
+	throttle: function (func, wait, options) {
+		var context, args, result;
+		var timeout = null;
+		var previous = 0;
+		if (!options) options = {};
+
+		let later = function () {
+			previous = options.leading === false ? 0 : Date.now();
+			timeout = null;
+			result = func.apply(context, args);
+			if (!timeout) context = args = null;
+		};
+
+		return function () {
+			var now = Date.now();
+			if (!previous && options.leading === false) previous = now;
+			let remaining = wait - (now - previous);
+			context = this;
+			args = arguments;
+			if (remaining <= 0 || remaining > wait) {
+				if (timeout) {
+					clearTimeout(timeout);
+					timeout = null;
+				}
+				previous = now;
+				result = func.apply(context, args);
+				if (!timeout) context = args = null;
+			} else if (!timeout && options.trailing !== false) {
+				timeout = setTimeout(later, remaining);
+			}
+			return result;
+		};
+	},
+	debounce: function(func, wait, immediate) {
+		var timeout;
+		return function() {
+			var context = this, args = arguments;
+			var later = function() {
+				timeout = null;
+				if (!immediate) func.apply(context, args);
+			};
+			var callNow = immediate && !timeout;
+			clearTimeout(timeout);
+			timeout = setTimeout(later, wait);
+			if (callNow) func.apply(context, args);
+		};
+	},
+	get_form_link: function(doctype, name, html = false) {
+		const route = ['#Form', doctype, name].join('/');
+		if (html) {
+			return `<a href="${route}">${name}</a>`;
+		}
+		return route;
 	}
 };
+
+// Array de duplicate
+if (!Array.prototype.uniqBy) {
+	Object.defineProperty(Array.prototype, 'uniqBy', {
+		value: function (key) {
+			var seen = {};
+			return this.filter(function (item) {
+				var k = key(item);
+				return seen.hasOwnProperty(k) ? false : (seen[k] = true);
+			});
+		}
+	});
+}

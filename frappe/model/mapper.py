@@ -6,6 +6,7 @@ import frappe, json
 from frappe import _
 from frappe.utils import cstr
 from frappe.model import default_fields
+from six import string_types
 
 @frappe.whitelist()
 def make_mapped_doc(method, source_name, selected_children=None):
@@ -25,24 +26,35 @@ def make_mapped_doc(method, source_name, selected_children=None):
 
 	return method(source_name)
 
+@frappe.whitelist()
+def map_docs(method, source_names, target_doc):
+	'''Returns the mapped document calling the given mapper method
+	with each of the given source docs on the target doc'''
+	method = frappe.get_attr(method)
+	if method not in frappe.whitelisted:
+		raise frappe.PermissionError
+
+	for src in json.loads(source_names):
+		target_doc = method(src, target_doc)
+	return target_doc
 
 def get_mapped_doc(from_doctype, from_docname, table_maps, target_doc=None,
 		postprocess=None, ignore_permissions=False, ignore_child_tables=False):
+
+	# main
+	if not target_doc:
+		target_doc = frappe.new_doc(table_maps[from_doctype]["doctype"])
+	elif isinstance(target_doc, string_types):
+		target_doc = frappe.get_doc(json.loads(target_doc))
+
+	if not ignore_permissions and not target_doc.has_permission("create"):
+		target_doc.raise_no_permission_to("create")
 
 	source_doc = frappe.get_doc(from_doctype, from_docname)
 
 	if not ignore_permissions:
 		if not source_doc.has_permission("read"):
 			source_doc.raise_no_permission_to("read")
-
-	# main
-	if not target_doc:
-		target_doc = frappe.new_doc(table_maps[from_doctype]["doctype"])
-	elif isinstance(target_doc, basestring):
-		target_doc = frappe.get_doc(json.loads(target_doc))
-
-	if not ignore_permissions and not target_doc.has_permission("create"):
-		target_doc.raise_no_permission_to("create")
 
 	map_doc(source_doc, target_doc, table_maps[source_doc.doctype])
 
@@ -163,12 +175,13 @@ def map_fetch_fields(target_doc, df, no_copy_fields):
 	linked_doc = None
 
 	# options should be like "link_fieldname.fieldname_in_liked_doc"
-	for fetch_df in target_doc.meta.get("fields", {"options": "^{0}.".format(df.fieldname)}):
+	for fetch_df in target_doc.meta.get("fields", {"fetch_from": "^{0}.".format(df.fieldname)}):
 		if not (fetch_df.fieldtype == "Read Only" or fetch_df.read_only):
 			continue
 
-		if not target_doc.get(fetch_df.fieldname) and fetch_df.fieldname not in no_copy_fields:
-			source_fieldname = fetch_df.options.split(".")[1]
+		if ((not target_doc.get(fetch_df.fieldname) or fetch_df.fieldtype == "Read Only")
+			and fetch_df.fieldname not in no_copy_fields):
+			source_fieldname = fetch_df.fetch_from.split(".")[1]
 
 			if not linked_doc:
 				try:

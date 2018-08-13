@@ -22,7 +22,7 @@ cur_frm.cscript.refresh = function(doc) {
 	cur_frm.add_custom_button("Show Report", function() {
 		switch(doc.report_type) {
 			case "Report Builder":
-				frappe.set_route("Report", doc.ref_doctype, doc.name);
+				frappe.set_route('List', doc.ref_doctype, 'Report', doc.name);
 				break;
 			case "Query Report":
 				frappe.set_route("query-report", doc.name);
@@ -50,3 +50,29 @@ cur_frm.cscript.refresh = function(doc) {
 
 	cur_frm.cscript.report_type(doc);
 }
+
+
+frappe.ui.form.on('Report', {
+	refresh: function(frm) {
+		if(!frappe.boot.developer_mode && frappe.session.user != 'Administrator') {
+			// make the document read-only
+			frm.set_read_only();
+		}
+	},
+
+	ref_doctype: function(frm) {
+		if(frm.doc.ref_doctype) {
+			frm.trigger("set_doctype_roles")
+		}
+	},
+
+	set_doctype_roles: function(frm) {
+		return frappe.call({
+			method: "set_doctype_roles",
+			doc:frm.doc,
+			callback: function(r) {
+				refresh_field('roles')
+			}
+		})
+	}
+})

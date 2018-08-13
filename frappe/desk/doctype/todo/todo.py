@@ -17,7 +17,7 @@ class ToDo(Document):
 		self._assignment = None
 		if self.is_new():
 			self._assignment = {
-				"text": frappe._("Assigned to {0}: {1}").format(get_fullname(self.owner), self.description),
+				"text": frappe._("{0} assigned {1}: {2}").format(get_fullname(self.assigned_by), get_fullname(self.owner), self.description),
 				"comment_type": "Assigned"
 			}
 
@@ -65,7 +65,7 @@ class ToDo(Document):
 			frappe.db.set_value(self.reference_type, self.reference_name,
 				"_assign", json.dumps(assignments), update_modified=False)
 
-		except Exception, e:
+		except Exception as e:
 			if e.args[0] == 1146 and frappe.flags.in_install:
 				# no table
 				return

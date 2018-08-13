@@ -1,7 +1,7 @@
 {% if (_checkbox) { %}
-<input class="list-delete" type="checkbox"
-    style="margin: 0 7px 0 0; vertical-align: middle;">
+<input class="list-row-checkbox hidden-xs" type="checkbox" data-name="{{name}}">
 {% } %}
+{% if (!_hide_activity) { %}
 <span class="liked-by" data-liked-by=\'{{ JSON.stringify(_liked_by) }}\'>
 	<i class="octicon octicon-heart
 	    {% if (_liked_by.indexOf(_user)===-1) { %}
@@ -12,11 +12,13 @@
 	</i>
 	<span class="likes-count">{{ (_liked_by.length > 99 ? "99+" : _liked_by.length) || "" }}</span>
 </span>
-<a class="grey list-id {{ css_seen }}"
+{% } %}
+
+{% var anchor_title = (_full_title).replace(/["]/g, "&\quot;"); %}
+<a class="grey list-id {{ css_seen }} ellipsis"
 	data-name="{{ _name }}"
-    style="margin-right: 7px; margin-left: -8px;"
 	href="#Form/{{ _doctype_encoded }}/{{ _name_encoded }}"
-    title="{{ _full_title }}">{{ strip_html(_title) }}</a>
+    title="{{ anchor_title }}">{{ strip_html(_title) }}</a>
 {% if (_workflow && !_without_workflow) { %}
 <span class="label label-{{ _workflow.style }} filterable"
     data-filter="{{ _workflow.fieldname }},=,{{ _workflow.value }}">

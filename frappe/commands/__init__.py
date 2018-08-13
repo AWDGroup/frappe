@@ -1,15 +1,16 @@
 # Copyright (c) 2015, Web Notes Technologies Pvt. Ltd. and Contributors
 # MIT License. See license.txt
 
-from __future__ import unicode_literals, absolute_import
+from __future__ import unicode_literals, absolute_import, print_function
 import sys
 import click
 import cProfile
-import StringIO
 import pstats
 import frappe
 import frappe.utils
+import subprocess # nosec
 from functools import wraps
+from six import StringIO
 
 click.disable_unicode_literals_warning = True
 
@@ -25,11 +26,14 @@ def pass_context(f):
 
 		if profile:
 			pr.disable()
-			s = StringIO.StringIO()
+			s = StringIO()
 			ps = pstats.Stats(pr, stream=s)\
 				.sort_stats('cumtime', 'tottime', 'ncalls')
 			ps.print_stats()
-			print s.getvalue()
+
+			# print the top-100
+			for line in s.getvalue().splitlines()[:100]:
+				print(line)
 
 		return ret
 
@@ -40,8 +44,28 @@ def get_site(context):
 		site = context.sites[0]
 		return site
 	except (IndexError, TypeError):
-		print 'Please specify --site sitename'
+		print('Please specify --site sitename')
 		sys.exit(1)
+
+def popen(command, *args, **kwargs):
+	output    = kwargs.get('output', True)
+	cwd       = kwargs.get('cwd')
+	shell     = kwargs.get('shell', True)
+	raise_err = kwargs.get('raise_err')
+
+	proc = subprocess.Popen(command,
+		stdout = None if output else subprocess.PIPE,
+		stderr = None if output else subprocess.PIPE,
+		shell  = shell,
+		cwd    = cwd
+	)
+
+	return_ = proc.wait()
+
+	if raise_err:
+		raise subprocess.CalledProcessError(return_, command)
+
+	return return_
 
 def call_command(cmd, context):
 	return click.Context(cmd, obj=context).forward(cmd)

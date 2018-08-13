@@ -9,16 +9,15 @@ from frappe.utils import cstr
 from frappe.utils.file_manager import save_file, remove_file_by_url
 from frappe.website.utils import get_comment_list
 from frappe.custom.doctype.customize_form.customize_form import docfield_properties
-from frappe.integration_broker.doctype.integration_service.integration_service import get_integration_controller
 from frappe.utils.file_manager import get_max_file_size
 from frappe.modules.utils import export_module_json, get_doc_module
-from urllib import urlencode
+from six.moves.urllib.parse import urlencode
+from frappe.integrations.utils import get_payment_gateway_controller
+from six import iteritems
+
 
 class WebForm(WebsiteGenerator):
 	website = frappe._dict(
-		template = "templates/generators/web_form.html",
-		condition_field = "published",
-		page_title_field = "title",
 		no_cache = 1
 	)
 
@@ -159,24 +158,26 @@ def get_context(context):
 		context.parents = self.get_parents(context)
 
 		if self.breadcrumbs:
-			context.parents = eval(self.breadcrumbs)
+			context.parents = frappe.safe_eval(self.breadcrumbs, { "_": _ })
 
 		context.has_header = ((frappe.form_dict.name or frappe.form_dict.new)
 			and (frappe.session.user!="Guest" or not self.login_required))
 
 		if context.success_message:
-			context.success_message = context.success_message.replace("\n",
-				"<br>").replace("'", "\'")
+			context.success_message = frappe.db.escape(context.success_message.replace("\n",
+				"<br>"))
 
 		self.add_custom_context_and_script(context)
 		if not context.max_attachment_size:
 			context.max_attachment_size = get_max_file_size() / 1024 / 1024
 
+		context.show_in_grid = self.show_in_grid
+
 	def load_document(self, context):
 		'''Load document `doc` and `layout` properties for template'''
 		if frappe.form_dict.name or frappe.form_dict.new:
 			context.layout = self.get_layout()
-			context.parents = [{"route": self.route, "title": self.title }]
+			context.parents = [{"route": self.route, "label": _(self.title) }]
 
 		if frappe.form_dict.name:
 			context.doc = frappe.get_doc(self.doc_type, frappe.form_dict.name)
@@ -209,7 +210,7 @@ def get_context(context):
 		context.params_from_form_dict = ''
 
 		params = {}
-		for key, value in frappe.form_dict.iteritems():
+		for key, value in iteritems(frappe.form_dict):
 			if frappe.get_meta(self.doc_type).get_field(key):
 				params[key] = value
 
@@ -224,7 +225,7 @@ def get_context(context):
 
 	def get_payment_gateway_url(self, doc):
 		if self.accept_payment:
-			controller = get_integration_controller(self.payment_gateway)
+			controller = get_payment_gateway_controller(self.payment_gateway)
 
 			title = "Payment for {0} {1}".format(doc.doctype, doc.name)
 			amount = self.amount
@@ -256,7 +257,7 @@ def get_context(context):
 
 			js_path = os.path.join(os.path.dirname(self.web_form_module.__file__), scrub(self.name) + '.js')
 			if os.path.exists(js_path):
-				context.script = open(js_path, 'r').read()
+				context.script = frappe.render_template(open(js_path, 'r').read(), context)
 
 			css_path = os.path.join(os.path.dirname(self.web_form_module.__file__), scrub(self.name) + '.css')
 			if os.path.exists(css_path):
@@ -274,7 +275,8 @@ def get_context(context):
 
 		def add_section(df=None):
 			new_section = {'columns': []}
-			layout[-1]['sections'].append(new_section)
+			if layout:
+				layout[-1]['sections'].append(new_section)
 			if df and df.fieldtype=='Section Break':
 				new_section.update(df.as_dict())
 
@@ -282,7 +284,8 @@ def get_context(context):
 
 		def add_column(df=None):
 			new_col = []
-			layout[-1]['sections'][-1]['columns'].append(new_col)
+			if layout:
+				layout[-1]['sections'][-1]['columns'].append(new_col)
 
 			return new_col
 
@@ -359,6 +362,7 @@ def accept(web_form, data, for_payment=False):
 		frappe.throw(_("You are not allowed to update this Web Form Document"))
 
 	frappe.flags.in_web_form = True
+	meta = frappe.get_meta(data.doctype)
 
 	if data.name:
 		# update
@@ -368,18 +372,19 @@ def accept(web_form, data, for_payment=False):
 		doc = frappe.new_doc(data.doctype)
 
 	# set values
-	for fieldname, value in data.iteritems():
-		if value and isinstance(value, dict):
-			try:
-				if "__file_attachment" in value:
-					files.append((fieldname, value))
-					continue
-				if '__no_attachment' in value:
-					files_to_delete.append(doc.get(fieldname))
-					value = ''
+	for field in web_form.web_form_fields:
+		fieldname = field.fieldname
+		df = meta.get_field(fieldname)
+		value = data.get(fieldname, None)
 
-			except ValueError:
-				pass
+		if df and df.fieldtype in ('Attach', 'Attach Image'):
+			if value and 'data:' and 'base64' in value:
+				files.append((fieldname, value))
+				doc.set(fieldname, '')
+				continue
+
+			elif not value and doc.get(fieldname):
+				files_to_delete.append(doc.get(fieldname))
 
 		doc.set(fieldname, value)
 
@@ -399,7 +404,7 @@ def accept(web_form, data, for_payment=False):
 		if web_form.login_required and frappe.session.user=="Guest":
 			frappe.throw(_("You must login to submit this form"))
 
-		doc.insert(ignore_permissions = True)
+		doc.insert(ignore_permissions = True, ignore_mandatory = True if files else False)
 
 	# add files
 	if files:
@@ -411,13 +416,14 @@ def accept(web_form, data, for_payment=False):
 				remove_file_by_url(doc.get(fieldname), doc.doctype, doc.name)
 
 			# save new file
-			filedoc = save_file(filedata["filename"], filedata["dataurl"],
+			filename, dataurl = filedata.split(',', 1)
+			filedoc = save_file(filename, dataurl,
 				doc.doctype, doc.name, decode=True)
 
 			# update values
 			doc.set(fieldname, filedoc.file_url)
 
-		doc.save()
+		doc.save(ignore_permissions = True)
 
 	if files_to_delete:
 		for f in files_to_delete:
@@ -429,7 +435,7 @@ def accept(web_form, data, for_payment=False):
 	if for_payment:
 		return web_form.get_payment_gateway_url(doc)
 	else:
-		return doc.name
+		return doc.as_dict()
 
 @frappe.whitelist()
 def delete(web_form, name):
@@ -439,7 +445,7 @@ def delete(web_form, name):
 	if frappe.session.user == owner and web_form.allow_delete:
 		frappe.delete_doc(web_form.doc_type, name, ignore_permissions=True)
 	else:
-		raise frappe.PermissionError, "Not Allowed"
+		raise frappe.PermissionError("Not Allowed")
 
 def has_web_form_permission(doctype, name, ptype='read'):
 	if frappe.session.user=="Guest":
@@ -484,3 +490,22 @@ def make_route_string(parameters):
 				route_string += route_string + delimeter + key + "=" + cstr(parameters[key])
 				delimeter = '&'
 	return (route_string, delimeter)
+
+@frappe.whitelist(allow_guest=True)
+def get_form_data(doctype, docname, web_form_name):
+	out = frappe._dict()
+
+	if docname:
+		doc = frappe.get_doc(doctype, docname)
+		if has_web_form_permission(doctype, docname, ptype='read'):
+			out.doc = doc
+		else:
+			frappe.throw(_("Not permitted"), frappe.PermissionError)
+
+	out.web_form = frappe.get_doc('Web Form', web_form_name)
+	return out
+
+@frappe.whitelist()
+def get_in_list_view_fields(doctype):
+	return [df.as_dict() for df in frappe.get_meta(doctype).fields if df.in_list_view]
+

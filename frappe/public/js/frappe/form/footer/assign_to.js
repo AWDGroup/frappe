@@ -55,13 +55,13 @@ frappe.ui.form.AssignTo = Class.extend({
 				</li>', info))
 					.insertBefore(this.parent.find('.add-assignment'));
 
-				if(d[i].owner===user) {
+				if(d[i].owner===frappe.session.user) {
 					me.primary_action = this.frm.page.add_menu_item(__("Assignment Complete"), function() {
-						me.remove(user);
+						me.remove(frappe.session.user);
 					}, "fa fa-check", "btn-success")
 				}
 
-				if(!(d[i].owner === user || me.frm.perm[0].write)) {
+				if(!(d[i].owner === frappe.session.user || me.frm.perm[0].write)) {
 					me.parent.find('a.close').remove();
 				}
 			}
@@ -80,7 +80,7 @@ frappe.ui.form.AssignTo = Class.extend({
 	add: function() {
 		var me = this;
 
-		if(this.frm.doc.__unsaved == 1) {
+		if(this.frm.is_new()) {
 			frappe.throw(__("Please save the document before assignment"));
 			return;
 		}
@@ -93,7 +93,6 @@ frappe.ui.form.AssignTo = Class.extend({
 				docname: me.frm.docname,
 				callback: function(r) {
 					me.render(r.message);
-					me.frm.reload_doc();
 				}
 			});
 		}
@@ -108,7 +107,7 @@ frappe.ui.form.AssignTo = Class.extend({
 	remove: function(owner) {
 		var me = this;
 
-		if(this.frm.doc.__unsaved == 1) {
+		if(this.frm.is_new()) {
 			frappe.throw(__("Please save the document before removing assignment"));
 			return;
 		}
@@ -122,7 +121,6 @@ frappe.ui.form.AssignTo = Class.extend({
 			},
 			callback:function(r,rt) {
 				me.render(r.message);
-				me.frm.reload_doc();
 			}
 		});
 	}
@@ -138,12 +136,12 @@ frappe.ui.form.AssignToDialog = Class.extend({
 				{fieldtype: 'Link', fieldname:'assign_to', options:'User',
 					label:__("Assign To"), reqd:true, filters: {'user_type': 'System User'}},
 				{fieldtype:'Check', fieldname:'myself', label:__("Assign to me"), "default":0},
-				{fieldtype:'Small Text', fieldname:'description', label:__("Comment"), reqd:true},
+				{fieldtype:'Small Text', fieldname:'description', label:__("Comment")},
 				{fieldtype: 'Section Break'},
 				{fieldtype: 'Column Break'},
 				{fieldtype:'Date', fieldname:'date', label: __("Complete By")},
 				{fieldtype:'Check', fieldname:'notify',
-					label:__("Notify by Email"), "default":1},
+					label:__("Notify by Email")},
 				{fieldtype: 'Column Break'},
 				{fieldtype:'Select', fieldname:'priority', label: __("Priority"),
 					options:[
@@ -166,7 +164,7 @@ frappe.ui.form.AssignToDialog = Class.extend({
 	toggle_myself: function(myself) {
 		var me = this;
 		if($(myself).prop("checked")) {
-			me.set_value("assign_to", user);
+			me.set_value("assign_to", frappe.session.user);
 			me.set_value("notify", 0);
 			me.get_field("notify").$wrapper.toggle(false);
 			me.get_field("assign_to").$wrapper.toggle(false);
@@ -181,8 +179,8 @@ frappe.ui.form.AssignToDialog = Class.extend({
 });
 
 frappe.ui.add_assignment = function(opts, dialog) {
-	var assign_to = opts.obj.dialog.fields_dict.assign_to.get_value();
-	var args = opts.obj.dialog.get_values();
+	var assign_to = dialog.fields_dict.assign_to.get_value();
+	var args = dialog.get_values();
 	if(args && assign_to) {
 		return frappe.call({
 			method: opts.method,

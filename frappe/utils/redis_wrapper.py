@@ -3,8 +3,10 @@
 from __future__ import unicode_literals
 
 import redis, frappe, re
-import cPickle as pickle
+from six.moves import cPickle as pickle
 from frappe.utils import cstr
+from six import iteritems
+
 
 class RedisWrapper(redis.Redis):
 	"""Redis client that will automatically prefix conf.db_name"""
@@ -90,7 +92,7 @@ class RedisWrapper(redis.Redis):
 
 		except redis.exceptions.ConnectionError:
 			regex = re.compile(cstr(key).replace("|", "\|").replace("*", "[\w]*"))
-			return [k for k in frappe.local.cache.keys() if regex.match(k)]
+			return [k for k in list(frappe.local.cache) if regex.match(k.decode())]
 
 	def delete_keys(self, key):
 		"""Delete keys with wildcard `*`."""
@@ -119,11 +121,11 @@ class RedisWrapper(redis.Redis):
 			except redis.exceptions.ConnectionError:
 				pass
 
-	def lpush(self, key, value):
-		super(redis.Redis, self).lpush(self.make_key(key), value)
+	def lpush(self, key, *values):
+		super(redis.Redis, self).lpush(self.make_key(key), *values)
 
-	def rpush(self, key, value):
-		super(redis.Redis, self).rpush(self.make_key(key), value)
+	def rpush(self, key, *values):
+		super(redis.Redis, self).rpush(self.make_key(key), *values)
 
 	def lpop(self, key):
 		return super(redis.Redis, self).lpop(self.make_key(key))
@@ -148,7 +150,7 @@ class RedisWrapper(redis.Redis):
 
 	def hgetall(self, name):
 		return {key: pickle.loads(value) for key, value in
-			super(redis.Redis, self).hgetall(self.make_key(name)).iteritems()}
+			iteritems(super(redis.Redis, self).hgetall(self.make_key(name)))}
 
 	def hget(self, name, key, generator=None, shared=False):
 		_name = self.make_key(name, shared=shared)

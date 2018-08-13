@@ -1,7 +1,9 @@
 // Copyright (c) 2015, Frappe Technologies Pvt. Ltd. and Contributors
 // MIT License. See license.txt
 
-frappe.provide("frappe.messages")
+frappe.provide("frappe.messages");
+
+import './dialog';
 
 frappe.messages.waiting = function(parent, msg) {
 	return $(frappe.messages.get_waiting_message(msg))
@@ -18,7 +20,7 @@ frappe.throw = function(msg) {
 		msg = {message: msg, title: __('Error')};
 	}
 	if(!msg.indicator) msg.indicator = 'red';
-	msgprint(msg);
+	frappe.msgprint(msg);
 	throw new Error(msg.message);
 }
 
@@ -26,7 +28,7 @@ frappe.confirm = function(message, ifyes, ifno) {
 	var d = new frappe.ui.Dialog({
 		title: __("Confirm"),
 		fields: [
-			{fieldtype:"HTML", options:"<p class='frappe-confirm-message'>" + message + "</p>"}
+			{fieldtype:"HTML", options:`<p class="frappe-confirm-message">${message}</p>`}
 		],
 		primary_action_label: __("Yes"),
 		primary_action: function() {
@@ -133,16 +135,25 @@ frappe.msgprint = function(msg, title) {
 		msg_dialog.indicator = msg_dialog.header.find('.indicator');
 	}
 
-	if(data.message.search(/<br>|<p>|<li>/)==-1)
-		msg = replace_newlines(data.message);
+	if(data.message==null) {
+		data.message = '';
+	}
 
+	if(data.message.search(/<br>|<p>|<li>/)==-1) {
+		msg = frappe.utils.replace_newlines(data.message);
+	}
 
-	var msg_exists = msg_dialog.msg_area.html();
+	var msg_exists = false;
+	if(data.clear) {
+		msg_dialog.msg_area.empty();
+	} else {
+		msg_exists = msg_dialog.msg_area.html();
+	}
 
 	if(data.title || !msg_exists) {
 		// set title only if it is explicitly given
 		// and no existing title exists
-		msg_dialog.set_title(data.title || __('Message'))
+		msg_dialog.set_title(data.title || __('Message'));
 	}
 
 	// show / hide indicator
@@ -170,6 +181,8 @@ frappe.msgprint = function(msg, title) {
 
 	return msg_dialog;
 }
+
+window.msgprint = frappe.msgprint;
 
 frappe.hide_msgprint = function(instant) {
 	// clear msgprint
@@ -217,25 +230,31 @@ frappe.verify_password = function(callback) {
 	}, __("Verify Password"), __("Verify"))
 }
 
-var msgprint = frappe.msgprint;
-
-frappe.show_progress = function(title, count, total) {
-	if(frappe.cur_progress && frappe.cur_progress.title === title
-			&& frappe.cur_progress.$wrapper.is(":visible")) {
+frappe.show_progress = function(title, count, total=100, description) {
+	if(frappe.cur_progress && frappe.cur_progress.title === title && frappe.cur_progress.is_visible) {
 		var dialog = frappe.cur_progress;
 	} else {
 		var dialog = new frappe.ui.Dialog({
 			title: title,
 		});
-		dialog.progress = $('<div class="progress"><div class="progress-bar"></div></div>')
-			.appendTo(dialog.body);
-			dialog.progress_bar = dialog.progress.css({"margin-top": "10px"})
-				.find(".progress-bar");
+		dialog.progress = $(`<div>
+			<div class="progress">
+				<div class="progress-bar"></div>
+			</div>
+			<p class="description text-muted small"></p>
+		</div`).appendTo(dialog.body);
+		dialog.progress_bar = dialog.progress.css({"margin-top": "10px"})
+			.find(".progress-bar");
 		dialog.$wrapper.removeClass("fade");
 		dialog.show();
 		frappe.cur_progress = dialog;
 	}
-	dialog.progress_bar.css({"width": cint(flt(count) * 100 / total) + "%" });
+	if (description) {
+		dialog.progress.find('.description').text(description);
+	}
+	dialog.percent = cint(flt(count) * 100 / total);
+	dialog.progress_bar.css({"width": dialog.percent + "%" });
+	return dialog;
 }
 
 frappe.hide_progress = function() {
@@ -246,36 +265,55 @@ frappe.hide_progress = function() {
 }
 
 // Floating Message
-frappe.show_alert = function(message, seconds) {
+frappe.show_alert = function(message, seconds=7) {
 	if(typeof message==='string') {
 		message = {
 			message: message
-		}
+		};
 	}
 	if(!$('#dialog-container').length) {
 		$('<div id="dialog-container"><div id="alert-container"></div></div>').appendTo('body');
 	}
 
-	if(message.indicator) {
-		message_html = '<span class="indicator ' + message.indicator + '">' + message.message + '</span>';
-	} else {
-		message_html = message.message;
+	let body_html;
+
+	if (message.body) {
+		body_html = message.body;
 	}
 
-	var div = $(repl('<div class="alert desk-alert" style="display: none;">'
-			+ '<span class="alert-message">%(txt)s</span><a class="close">&times;</a>'
-		+ '</div>', {txt: message_html}))
-		.appendTo("#alert-container")
-		.fadeIn(300);
+	const div = $(`
+		<div class="alert desk-alert">
+			<div class="alert-message"></div>
+			<div class="alert-body" style="display: none"></div>
+			<a class="close">&times;</a>
+		</div>`);
 
-	div.find('.close').click(function() {
-		$(this).parent().remove();
+	div.find('.alert-message').append(message.message);
+
+	if(message.indicator) {
+		div.find('.alert-message').addClass('indicator '+ message.indicator);
+	}
+
+	if (body_html) {
+		div.find('.alert-body').show().html(body_html);
+	}
+
+	div.hide().appendTo("#alert-container").show()
+		.css('transform', 'translateX(0)');
+
+	div.find('.close, button').click(function() {
+		div.remove();
 		return false;
 	});
 
-	div.delay(seconds ? seconds * 1000 : 7000).fadeOut(300);
+	div.delay(seconds * 1000).fadeOut(300);
 	return div;
 }
 
-// for backward compatibility
-var show_alert = frappe.show_alert;
+// Proxy for frappe.show_alert
+Object.defineProperty(window, 'show_alert', {
+	get: function() {
+		console.warn('Please use `frappe.show_alert` instead of `show_alert`. It will be deprecated soon.');
+		return frappe.show_alert;
+	}
+});

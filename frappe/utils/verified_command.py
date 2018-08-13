@@ -3,21 +3,22 @@
 
 from __future__ import unicode_literals
 import hmac
-import urllib
+from six.moves.urllib.parse import urlencode
 from frappe import _
 
 import frappe
 import frappe.utils
+from six import string_types
 
 def get_signed_params(params):
 	"""Sign a url by appending `&_signature=xxxxx` to given params (string or dict).
 
 	:param params: String or dict of parameters."""
-	if not isinstance(params, basestring):
-		params = urllib.urlencode(params)
+	if not isinstance(params, string_types):
+		params = urlencode(params)
 
-	signature = hmac.new(params)
-	signature.update(get_secret())
+	signature = hmac.new(params.encode())
+	signature.update(get_secret().encode())
 	return params + "&_signature=" + signature.hexdigest()
 
 def get_secret():
@@ -25,17 +26,18 @@ def get_secret():
 
 def verify_request():
 	"""Verify if the incoming signed request if it is correct."""
-	query_string = frappe.local.flags.signed_query_string or \
-		getattr(frappe.request, 'query_string', None) \
+	query_string = frappe.safe_decode(frappe.local.flags.signed_query_string or \
+		getattr(frappe.request, 'query_string', None))
 
 	valid = False
 
-	if '&_signature=' in query_string:
-		params, signature = query_string.split("&_signature=")
+	signature_string = '&_signature='
+	if signature_string in query_string:
+		params, signature = query_string.split(signature_string)
 
-		given_signature = hmac.new(params.encode("utf-8"))
+		given_signature = hmac.new(params.encode('utf-8'))
 
-		given_signature.update(get_secret())
+		given_signature.update(get_secret().encode())
 		valid = signature == given_signature.hexdigest()
 
 	if not valid:
@@ -49,7 +51,7 @@ def get_url(cmd, params, nonce=None, secret=None):
 		nonce = params
 	signature = get_signature(params, nonce, secret)
 	params['signature'] = signature
-	return frappe.utils.get_url("".join(['api/method/', cmd, '?', urllib.urlencode(params)]))
+	return frappe.utils.get_url("".join(['api/method/', cmd, '?', urlencode(params)]))
 
 def get_signature(params, nonce, secret=None):
 	params = "".join((frappe.utils.cstr(p) for p in params.values()))

@@ -22,6 +22,22 @@ def get_jenv():
 def get_template(path):
 	return get_jenv().get_template(path)
 
+def get_email_from_template(name, args):
+	from jinja2 import TemplateNotFound
+
+	args = args or {}
+	try:
+		message = get_template('templates/emails/' + name + '.html').render(args)
+	except TemplateNotFound as e:
+		raise e
+
+	try:
+		text_content = get_template('templates/emails/' + name + '.txt').render(args)
+	except TemplateNotFound:
+		text_content = None
+
+	return (message, text_content)
+
 def validate_template(html):
 	"""Throws exception if there is a syntax error in the Jinja Template"""
 	import frappe
@@ -30,8 +46,8 @@ def validate_template(html):
 	jenv = get_jenv()
 	try:
 		jenv.from_string(html)
-	except TemplateSyntaxError, e:
- 		frappe.msgprint('Line {}: {}'.format(e.lineno, e.message))
+	except TemplateSyntaxError as e:
+		frappe.msgprint('Line {}: {}'.format(e.lineno, e.message))
 		frappe.throw(frappe._("Syntax error in template"))
 
 def render_template(template, context, is_path=None):
@@ -40,6 +56,9 @@ def render_template(template, context, is_path=None):
 	:param template: path or HTML containing the jinja template
 	:param context: dict of properties to pass to the template
 	:param is_path: (optional) assert that the `template` parameter is a path'''
+
+	if not template:
+		return ""
 
 	# if it ends with .html then its a freaking path, not html
 	if (is_path
@@ -50,16 +69,17 @@ def render_template(template, context, is_path=None):
 		return get_jenv().from_string(template).render(context)
 
 def get_allowed_functions_for_jenv():
-	import os
+	import os, json
 	import frappe
 	import frappe.utils
 	import frappe.utils.data
 	from frappe.utils.autodoc import automodule, get_version
 	from frappe.model.document import get_controller
-	from frappe.website.utils import get_shade
+	from frappe.website.utils import (get_shade, get_toc, get_next_link)
 	from frappe.modules import scrub
 	import mimetypes
 	from html2text import html2text
+	from frappe.www.printview import get_visible_columns
 
 	datautils = {}
 	if frappe.db:
@@ -97,36 +117,49 @@ def get_allowed_functions_for_jenv():
 			"get_doc": frappe.get_doc,
 			"get_list": frappe.get_list,
 			"get_all": frappe.get_all,
+			'get_system_settings': frappe.get_system_settings,
 			"utils": datautils,
 			"user": user,
 			"get_fullname": frappe.utils.get_fullname,
 			"get_gravatar": frappe.utils.get_gravatar_url,
-			"full_name": getattr(frappe.local, "session", None) and frappe.local.session.data.full_name or "Guest",
+			"full_name": frappe.local.session.data.full_name if getattr(frappe.local, "session", None) else "Guest",
 			"render_template": frappe.render_template,
 			'session': {
-				'user': user
+				'user': user,
+				'csrf_token': frappe.local.session.data.csrf_token if getattr(frappe.local, "session", None) else ''
 			},
+		},
+		'style': {
+			'border_color': '#d1d8dd'
 		},
 		"autodoc": {
 			"get_version": get_version,
 			"automodule": automodule,
 			"get_controller": get_controller
 		},
+		'get_toc': get_toc,
+		'get_next_link': get_next_link,
 		"_": frappe._,
 		"get_shade": get_shade,
 		"scrub": scrub,
 		"guess_mimetype": mimetypes.guess_type,
 		'html2text': html2text,
+		'json': json,
 		"dev_server": 1 if os.environ.get('DEV_SERVER', False) else 0
 	}
 
 	if not frappe.flags.in_setup_help:
-		out['get_visible_columns'] = frappe.get_attr("frappe.www.print.get_visible_columns")
+		out['get_visible_columns'] = get_visible_columns
 		out['frappe']['date_format'] = date_format
 		out['frappe']["db"] = {
 			"get_value": frappe.db.get_value,
 			"get_default": frappe.db.get_default,
+			"escape": frappe.db.escape,
 		}
+
+	# load jenv methods from hooks.py
+	for method_name, method_definition in get_jenv_customization("methods"):
+		out[method_name] = frappe.get_attr(method_definition)
 
 	return out
 
@@ -138,8 +171,10 @@ def get_jloader():
 		if frappe.local.flags.in_setup_help:
 			apps = ['frappe']
 		else:
-			apps = frappe.local.flags.web_pages_apps or frappe.get_installed_apps(sort=True)
-			apps.reverse()
+			apps = frappe.get_hooks('template_apps')
+			if not apps:
+				apps = frappe.local.flags.web_pages_apps or frappe.get_installed_apps(sort=True)
+				apps.reverse()
 
 		if not "frappe" in apps:
 			apps.append('frappe')
@@ -174,7 +209,16 @@ def set_filters(jenv):
 	if frappe.flags.in_setup_help: return
 
 	# load jenv_filters from hooks.py
-	for app in frappe.get_installed_apps():
-		for jenv_filter in (frappe.get_hooks(app_name=app).jenv_filter or []):
-			filter_name, filter_function = jenv_filter.split(":")
-			jenv.filters[filter_name] = frappe.get_attr(filter_function)
+	for filter_name, filter_function in get_jenv_customization("filters"):
+		jenv.filters[filter_name] = frappe.get_attr(filter_function)
+
+def get_jenv_customization(customizable_type):
+	import frappe
+
+	if getattr(frappe.local, "site", None):
+		for app in frappe.get_installed_apps():
+			for jenv_customizable, jenv_customizable_definition in frappe.get_hooks(app_name=app).get("jenv", {}).items():
+				if customizable_type == jenv_customizable:
+					for data in jenv_customizable_definition:
+						split_data = data.split(":")
+						yield split_data[0], split_data[1]

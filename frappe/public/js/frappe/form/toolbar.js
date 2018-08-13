@@ -54,14 +54,15 @@ frappe.ui.form.Toolbar = Class.extend({
 	is_title_editable: function() {
 		if (this.frm.meta.title_field==="title"
 			&& this.frm.perm[0].write
-			&& !this.frm.get_docfield("title").options) {
+			&& !this.frm.get_docfield("title").options
+			&& !this.frm.doc.__islocal) {
 			return true;
 		} else {
 			return false;
 		}
 	},
 	can_rename: function() {
-		return this.frm.perm[0].write && this.frm.meta.allow_rename;
+		return this.frm.perm[0].write && this.frm.meta.allow_rename && !this.frm.doc.__islocal;
 	},
 	setup_editable_title: function() {
 		var me = this;
@@ -91,7 +92,7 @@ frappe.ui.form.Toolbar = Class.extend({
 	set_indicator: function() {
 		if(this.frm.save_disabled)
 			return;
-		
+
 		var indicator = frappe.get_indicator(this.frm.doc);
 		if(indicator) {
 			this.page.set_indicator(indicator[0], indicator[1]);
@@ -114,7 +115,7 @@ frappe.ui.form.Toolbar = Class.extend({
 		// Print
 		if(!is_submittable || docstatus == 1  ||
 			(allow_print_for_cancelled && docstatus == 2)||
-	 		(allow_print_for_draft && docstatus == 0)) {
+			(allow_print_for_draft && docstatus == 0)) {
 			if(frappe.model.can_print(null, me.frm)) {
 				this.page.add_menu_item(__("Print"), function() {
 					me.frm.print_doc();}, true);
@@ -152,6 +153,13 @@ frappe.ui.form.Toolbar = Class.extend({
 		this.page.add_menu_item(__("Reload"), function() {
 			me.frm.reload_doc();}, true);
 
+		// add to desktop
+		if(me.frm.meta.issingle) {
+			this.page.add_menu_item(__('Add to Desktop'), function () {
+				frappe.add_to_desktop(me.frm.doctype, me.frm.doctype);
+			}, true);
+		}
+
 		// delete
 		if((cint(me.frm.doc.docstatus) != 1) && !me.frm.doc.__islocal
 			&& frappe.model.can_delete(me.frm.doctype)) {
@@ -159,7 +167,7 @@ frappe.ui.form.Toolbar = Class.extend({
 				me.frm.savetrash();}, true);
 		}
 
-		if(in_list(user_roles, "System Manager")) {
+		if(frappe.user_roles.includes("System Manager")) {
 			this.page.add_menu_item(__("Customize"), function() {
 				frappe.set_route("Form", "Customize Form", {
 					doc_type: me.frm.doctype
@@ -173,16 +181,15 @@ frappe.ui.form.Toolbar = Class.extend({
 				}, true);
 			}
 		}
-		
+
 		// feedback
 		if(!this.frm.doc.__unsaved) {
-			if(is_submittable && docstatus != 1)
-				return
-
-			this.page.add_menu_item(__("Ask a Feedback"), function() {
-				feedback = new frappe.utils.Feedback();
-				feedback.manual_feedback_request(me.frm.doc);
-			}, true)
+			if(is_submittable && docstatus == 1) {
+				this.page.add_menu_item(__("Request Feedback"), function() {
+					var feedback = new frappe.utils.Feedback();
+					feedback.manual_feedback_request(me.frm.doc);
+				}, true)
+			}
 		}
 
 		// New
@@ -210,8 +217,7 @@ frappe.ui.form.Toolbar = Class.extend({
 	can_cancel: function() {
 		return this.get_docstatus()===1
 			&& this.frm.perm[0].cancel
-			&& !this.read_only
-			&& !this.has_workflow();
+			&& !this.read_only;
 	},
 	can_amend: function() {
 		return this.get_docstatus()===2
@@ -258,7 +264,10 @@ frappe.ui.form.Toolbar = Class.extend({
 			status = "Submit";
 		} else if (this.can_save()) {
 			if (!this.frm.save_disabled) {
-				status = "Save";
+				//Show the save button if there is no workflow or if there is a workflow and there are changes
+				if (this.has_workflow() ? this.frm.doc.__unsaved : true) {
+					status = "Save";
+				}
 			}
 		} else if (this.can_update()) {
 			status = "Update";
@@ -283,7 +292,6 @@ frappe.ui.form.Toolbar = Class.extend({
 		if(status === "Edit") {
 			this.page.set_primary_action(__("Edit"), function() {
 				me.frm.page.set_view('main');
-				me.frm.set_hidden(false);
 			}, 'octicon octicon-pencil');
 		} else if(status === "Cancel") {
 			this.page.set_secondary_action(__(status), function() {
@@ -292,16 +300,16 @@ frappe.ui.form.Toolbar = Class.extend({
 		} else {
 			var click = {
 				"Save": function() {
-					me.frm.save('Save', null, this);
+					return me.frm.save('Save', null, this);
 				},
 				"Submit": function() {
-					me.frm.savesubmit(this);
+					return me.frm.savesubmit(this);
 				},
 				"Update": function() {
-					me.frm.save('Update', null, this);
+					return me.frm.save('Update', null, this);
 				},
 				"Amend": function() {
-					me.frm.amend_doc();
+					return me.frm.amend_doc();
 				}
 			}[status];
 

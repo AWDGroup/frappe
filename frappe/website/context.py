@@ -16,20 +16,20 @@ def get_context(path, args=None):
 		if args:
 			context.update(args)
 
-	context = build_context(context)
-
 	if hasattr(frappe.local, 'request'):
 		# for <body data-path=""> (remove leading slash)
 		# path could be overriden in render.resolve_from_map
-		context["path"] = frappe.local.request.path[1:]
+		context["path"] = frappe.local.request.path.strip('/ ')
 	else:
 		context["path"] = path
+
+	context.route = context.path
+
+	context = build_context(context)
 
 	# set using frappe.respond_as_web_page
 	if hasattr(frappe.local, 'response') and frappe.local.response.get('context'):
 		context.update(frappe.local.response.context)
-
-	# print frappe.as_json(context)
 
 	return context
 
@@ -48,12 +48,11 @@ def update_controller_context(context, controller):
 				ret = module.get_context(context)
 				if ret:
 					context.update(ret)
-			except frappe.Redirect:
-				raise
-			except frappe.PermissionError:
+			except (frappe.PermissionError, frappe.DoesNotExistError):
 				raise
 			except:
-				frappe.errprint(frappe.utils.get_traceback())
+				if not frappe.flags.in_migrate:
+					frappe.errprint(frappe.utils.get_traceback())
 
 		if hasattr(module, "get_children"):
 			context.children = module.get_children(context)
@@ -70,6 +69,9 @@ def build_context(context):
 	if context.url_prefix and context.url_prefix[-1]!='/':
 		context.url_prefix += '/'
 
+	# for backward compatibility
+	context.docs_base_url = '/docs'
+
 	context.update(get_website_settings())
 	context.update(frappe.local.conf.get("website_context") or {})
 
@@ -77,6 +79,10 @@ def build_context(context):
 	if context.doc:
 		context.update(context.doc.as_dict())
 		context.update(context.doc.get_website_properties())
+
+		if not context.template:
+			context.template = context.doc.meta.get_web_template()
+
 		if hasattr(context.doc, "get_context"):
 			ret = context.doc.get_context(context)
 
@@ -102,29 +108,76 @@ def build_context(context):
 				update_controller_context(context, extension)
 
 	add_metatags(context)
-
-	if context.show_sidebar:
-		context.no_cache = 1
-		add_sidebar_data(context)
-	else:
-		if context.basepath:
-			sidebar_json_path = os.path.join(context.basepath, '_sidebar.json')
-			if os.path.exists(sidebar_json_path):
-				with open(sidebar_json_path, 'r') as sidebarfile:
-					context.sidebar_items = json.loads(sidebarfile.read())
-					context.show_sidebar = 1
-
+	add_sidebar_and_breadcrumbs(context)
 
 	# determine templates to be used
 	if not context.base_template_path:
 		app_base = frappe.get_hooks("base_template")
 		context.base_template_path = app_base[0] if app_base else "templates/base.html"
 
+	if context.title_prefix and context.title and not context.title.startswith(context.title_prefix):
+		context.title = '{0} - {1}'.format(context.title_prefix, context.title)
+
 	return context
+
+def load_sidebar(context, sidebar_json_path):
+	with open(sidebar_json_path, 'r') as sidebarfile:
+		context.sidebar_items = json.loads(sidebarfile.read())
+		context.show_sidebar = 1
+
+def get_sidebar_json_path(path, look_for=False):
+	'''
+		Get _sidebar.json path from directory path
+
+		:param path: path of the current diretory
+		:param look_for: if True, look for _sidebar.json going upwards from given path
+
+		:return: _sidebar.json path
+	'''
+	if os.path.split(path)[1] == 'www' or path == '/' or not path:
+		return ''
+
+	sidebar_json_path = os.path.join(path, '_sidebar.json')
+	if os.path.exists(sidebar_json_path):
+		return sidebar_json_path
+	else:
+		if look_for:
+			return get_sidebar_json_path(os.path.split(path)[0], look_for)
+		else:
+			return ''
+
+def add_sidebar_and_breadcrumbs(context):
+	'''Add sidebar and breadcrumbs to context'''
+	from frappe.website.router import get_page_info_from_template
+	if context.show_sidebar:
+		context.no_cache = 1
+		add_sidebar_data(context)
+	else:
+		if context.basepath:
+			hooks = frappe.get_hooks('look_for_sidebar_json')
+			look_for_sidebar_json = hooks[0] if hooks else 0
+			sidebar_json_path = get_sidebar_json_path(
+				context.basepath,
+				look_for_sidebar_json
+			)
+			if sidebar_json_path:
+				load_sidebar(context, sidebar_json_path)
+
+	if context.add_breadcrumbs and not context.parents:
+		if context.basepath:
+			parent_path = os.path.dirname(context.path).rstrip('/')
+			page_info = get_page_info_from_template(parent_path)
+			if page_info:
+				context.parents = [dict(route=parent_path, title=page_info.title)]
 
 def add_sidebar_data(context):
 	from frappe.utils.user import get_fullname_and_avatar
 	import frappe.www.list
+
+	if context.show_sidebar and context.website_sidebar:
+		context.sidebar_items = frappe.get_all('Website Sidebar Item',
+			filters=dict(parent=context.website_sidebar), fields=['title', 'route', '`group`'],
+			order_by='idx asc')
 
 	if not context.sidebar_items:
 		sidebar_items = frappe.cache().hget('portal_menu_items', frappe.session.user)
@@ -163,7 +216,7 @@ def add_metatags(context):
 	tags = context.get("metatags")
 	if tags:
 		if not "twitter:card" in tags:
-			tags["twitter:card"] = "summary"
+			tags["twitter:card"] = "summary_large_image"
 		if not "og:type" in tags:
 			tags["og:type"] = "article"
 		if tags.get("name"):
@@ -171,5 +224,4 @@ def add_metatags(context):
 		if tags.get("description"):
 			tags["og:description"] = tags["twitter:description"] = tags["description"]
 		if tags.get("image"):
-			tags["og:image"] = tags["twitter:image:src"] = tags["image"]
-
+			tags["og:image"] = tags["twitter:image:src"] = tags["image"] = frappe.utils.get_url(tags.get("image"))

@@ -2,10 +2,12 @@
 # MIT License. See license.txt
 
 from __future__ import unicode_literals
+from six import iteritems, string_types
+import datetime
 import frappe, sys
 from frappe import _
 from frappe.utils import (cint, flt, now, cstr, strip_html, getdate, get_datetime, to_timedelta,
-	sanitize_html, sanitize_email)
+	sanitize_html, sanitize_email, cast_fieldtype)
 from frappe.model import default_fields
 from frappe.model.naming import set_new_name
 from frappe.model.utils.link_count import notify_link_count
@@ -25,7 +27,7 @@ def get_controller(doctype):
 	global _classes
 
 	if not doctype in _classes:
-		module_name, custom = frappe.db.get_value("DocType", doctype, ["module", "custom"]) \
+		module_name, custom = frappe.db.get_value("DocType", doctype, ("module", "custom"), cache=True) \
 			or ["Core", False]
 
 		if custom:
@@ -38,9 +40,9 @@ def get_controller(doctype):
 				if issubclass(_class, BaseDocument):
 					_class = getattr(module, classname)
 				else:
-					raise ImportError, doctype
+					raise ImportError(doctype)
 			else:
-				raise ImportError, doctype
+				raise ImportError(doctype)
 		_classes[doctype] = _class
 
 	return _classes[doctype]
@@ -71,7 +73,7 @@ class BaseDocument(object):
 			if key in d:
 				self.set(key, d.get(key))
 
-		for key, value in d.iteritems():
+		for key, value in iteritems(d):
 			self.set(key, value)
 
 		return self
@@ -82,7 +84,7 @@ class BaseDocument(object):
 
 		if "doctype" in d:
 			self.set("doctype", d.get("doctype"))
-		for key, value in d.iteritems():
+		for key, value in iteritems(d):
 			# dont_update_if_missing is a list of fieldnames, for which, you don't want to set default value
 			if (self.get(key) is None) and (value is not None) and (key not in self.dont_update_if_missing):
 				self.set(key, value)
@@ -138,9 +140,20 @@ class BaseDocument(object):
 
 			# reference parent document
 			value.parent_doc = self
+
 			return value
 		else:
-			raise ValueError, "Document attached to child table must be a dict or BaseDocument, not " + str(type(value))[1:-1]
+
+			# metaclasses may have arbitrary lists
+			# which we can ignore
+			if (getattr(self, '_metaclass', None)
+				or self.__class__.__name__ in ('Meta', 'FormMeta', 'DocField')):
+				return value
+
+			raise ValueError(
+				'Document for field "{0}" attached to child table of "{1}" must be a dict or BaseDocument, not {2} ({3})'.format(key,
+					self.name, str(type(value))[1:-1], value)
+			)
 
 	def extend(self, key, value):
 		if isinstance(value, list):
@@ -159,7 +172,7 @@ class BaseDocument(object):
 			if "doctype" not in value:
 				value["doctype"] = self.get_table_field_doctype(key)
 				if not value["doctype"]:
-					raise AttributeError, key
+					raise AttributeError(key)
 			value = get_controller(value["doctype"])(value)
 			value.init_valid_columns()
 
@@ -178,7 +191,7 @@ class BaseDocument(object):
 
 		return value
 
-	def get_valid_dict(self, sanitize=True):
+	def get_valid_dict(self, sanitize=True, convert_dates_to_str=False):
 		d = frappe._dict()
 		for fieldname in self.meta.get_valid_columns():
 			d[fieldname] = self.get(fieldname)
@@ -202,7 +215,7 @@ class BaseDocument(object):
 				elif df.fieldtype in ("Currency", "Float", "Percent") and not isinstance(d[fieldname], float):
 					d[fieldname] = flt(d[fieldname])
 
-				elif df.fieldtype in ("Datetime", "Date") and d[fieldname]=="":
+				elif df.fieldtype in ("Datetime", "Date", "Time") and d[fieldname]=="":
 					d[fieldname] = None
 
 				elif df.get("unique") and cstr(d[fieldname]).strip()=="":
@@ -211,6 +224,9 @@ class BaseDocument(object):
 
 				if isinstance(d[fieldname], list) and df.fieldtype != 'Table':
 					frappe.throw(_('Value for {0} cannot be a list').format(_(df.label)))
+
+				if convert_dates_to_str and isinstance(d[fieldname], (datetime.datetime, datetime.time, datetime.timedelta)):
+					d[fieldname] = str(d[fieldname])
 
 		return d
 
@@ -241,20 +257,20 @@ class BaseDocument(object):
 	def is_new(self):
 		return self.get("__islocal")
 
-	def as_dict(self, no_nulls=False, no_default_fields=False):
-		doc = self.get_valid_dict()
+	def as_dict(self, no_nulls=False, no_default_fields=False, convert_dates_to_str=False):
+		doc = self.get_valid_dict(convert_dates_to_str=convert_dates_to_str)
 		doc["doctype"] = self.doctype
 		for df in self.meta.get_table_fields():
 			children = self.get(df.fieldname) or []
 			doc[df.fieldname] = [d.as_dict(no_nulls=no_nulls) for d in children]
 
 		if no_nulls:
-			for k in doc.keys():
+			for k in list(doc):
 				if doc[k] is None:
 					del doc[k]
 
 		if no_default_fields:
-			for k in doc.keys():
+			for k in list(doc):
 				if k in default_fields:
 					del doc[k]
 
@@ -284,17 +300,17 @@ class BaseDocument(object):
 			self.creation = self.modified = now()
 			self.created_by = self.modifield_by = frappe.session.user
 
-		d = self.get_valid_dict()
+		d = self.get_valid_dict(convert_dates_to_str=True)
 
-		columns = d.keys()
+		columns = list(d)
 		try:
 			frappe.db.sql("""insert into `tab{doctype}`
 				({columns}) values ({values})""".format(
 					doctype = self.doctype,
 					columns = ", ".join(["`"+c+"`" for c in columns]),
 					values = ", ".join(["%s"] * len(columns))
-				), d.values())
-		except Exception, e:
+				), list(d.values()))
+		except Exception as e:
 			if e.args[0]==1062:
 				if "PRIMARY" in cstr(e.args[1]):
 					if self.meta.autoname=="hash":
@@ -303,9 +319,8 @@ class BaseDocument(object):
 						self.db_insert()
 						return
 
-					type, value, traceback = sys.exc_info()
 					frappe.msgprint(_("Duplicate name {0} {1}").format(self.doctype, self.name))
-					raise frappe.DuplicateEntryError, (self.doctype, self.name, e), traceback
+					raise frappe.DuplicateEntryError(self.doctype, self.name, e)
 
 				elif "Duplicate" in cstr(e.args[1]):
 					# unique constraint
@@ -314,7 +329,6 @@ class BaseDocument(object):
 					raise
 			else:
 				raise
-
 		self.set("__islocal", False)
 
 	def db_update(self):
@@ -322,21 +336,21 @@ class BaseDocument(object):
 			self.db_insert()
 			return
 
-		d = self.get_valid_dict()
+		d = self.get_valid_dict(convert_dates_to_str=True)
 
 		# don't update name, as case might've been changed
 		name = d['name']
 		del d['name']
 
-		columns = d.keys()
+		columns = list(d)
 
 		try:
 			frappe.db.sql("""update `tab{doctype}`
 				set {values} where name=%s""".format(
 					doctype = self.doctype,
 					values = ", ".join(["`"+c+"`=%s" for c in columns])
-				), d.values() + [name])
-		except Exception, e:
+				), list(d.values()) + [name])
+		except Exception as e:
 			if e.args[0]==1062 and "Duplicate" in cstr(e.args[1]):
 				self.show_unique_validation_message(e)
 			else:
@@ -358,37 +372,7 @@ class BaseDocument(object):
 		frappe.msgprint(_("{0} must be unique".format(label or fieldname)))
 
 		# this is used to preserve traceback
-		raise frappe.UniqueValidationError, (self.doctype, self.name, e), traceback
-
-	def db_set(self, fieldname, value=None, update_modified=True):
-		'''Set a value in the document object, update the timestamp and update the database.
-
-		WARNING: This method does not trigger controller validations and should
-		be used very carefully.
-
-		:param fieldname: fieldname of the property to be updated, or a {"field":"value"} dictionary
-		:param value: value of the property to be updated
-		:param update_modified: default True. updates the `modified` and `modified_by` properties
-		'''
-		if isinstance(fieldname, dict):
-			self.update(fieldname)
-		else:
-			self.set(fieldname, value)
-
-		if update_modified and (self.doctype, self.name) not in frappe.flags.currently_saving:
-			# don't update modified timestamp if called from post save methods
-			# like on_update or on_submit
-			self.set("modified", now())
-			self.set("modified_by", frappe.session.user)
-
-		frappe.db.set_value(self.doctype, self.name, fieldname, value,
-			self.modified, self.modified_by, update_modified=update_modified)
-
-		self.run_method('on_change')
-
-	def db_get(self, fieldname):
-		'''get database vale for this fieldname'''
-		return frappe.db.get_value(self.doctype, self.name, fieldname)
+		raise frappe.UniqueValidationError(self.doctype, self.name, e)
 
 	def update_modified(self):
 		'''Update modified timestamp'''
@@ -417,16 +401,15 @@ class BaseDocument(object):
 				return "{}: {}: {}".format(_("Error"), _("Data missing in table"), _(df.label))
 
 			elif self.parentfield:
-
 				return "{}: {} {} #{}: {}: {}".format(_("Error"), frappe.bold(_(self.doctype)),
 					_("Row"), self.idx, _("Value missing for"), _(df.label))
 
 			else:
-				return "{}: {}: {}".format(_("Error"), _("Value missing for"), _(df.label))
+				return _("Error: Value missing for {0}: {1}").format(_(df.parent), _(df.label))
 
 		missing = []
 
-		for df in self.meta.get("fields", {"reqd": 1}):
+		for df in self.meta.get("fields", {"reqd": ('=', 1)}):
 			if self.get(df.fieldname) in (None, []) or not strip_html(cstr(self.get(df.fieldname))).strip():
 				missing.append((df.fieldname, get_msg(df)))
 
@@ -450,7 +433,7 @@ class BaseDocument(object):
 		cancelled_links = []
 
 		for df in (self.meta.get_link_fields()
-				 + self.meta.get("fields", {"fieldtype":"Dynamic Link"})):
+				 + self.meta.get("fields", {"fieldtype": ('=', "Dynamic Link")})):
 			docname = self.get(df.fieldname)
 
 			if docname:
@@ -478,7 +461,7 @@ class BaseDocument(object):
 					values = frappe._dict(name=frappe.db.get_value(doctype, docname,
 						'name', cache=True))
 				else:
-					values_to_fetch = ['name'] + [_df.options.split('.')[-1]
+					values_to_fetch = ['name'] + [_df.fetch_from.split('.')[-1]
 						for _df in fields_to_fetch]
 
 					# don't cache if fetching other values too
@@ -488,21 +471,22 @@ class BaseDocument(object):
 				if frappe.get_meta(doctype).issingle:
 					values.name = doctype
 
-				setattr(self, df.fieldname, values.name)
+				if values:
+					setattr(self, df.fieldname, values.name)
 
-				for _df in fields_to_fetch:
-					setattr(self, _df.fieldname, values[_df.options.split('.')[-1]])
+					for _df in fields_to_fetch:
+						setattr(self, _df.fieldname, values[_df.fetch_from.split('.')[-1]])
 
-				notify_link_count(doctype, docname)
+					notify_link_count(doctype, docname)
 
-				if not values.name:
-					invalid_links.append((df.fieldname, docname, get_msg(df, docname)))
+					if not values.name:
+						invalid_links.append((df.fieldname, docname, get_msg(df, docname)))
 
-				elif (df.fieldname != "amended_from"
-					and (is_submittable or self.meta.is_submittable) and frappe.get_meta(doctype).is_submittable
-					and cint(frappe.db.get_value(doctype, docname, "docstatus"))==2):
+					elif (df.fieldname != "amended_from"
+						and (is_submittable or self.meta.is_submittable) and frappe.get_meta(doctype).is_submittable
+						and cint(frappe.db.get_value(doctype, docname, "docstatus"))==2):
 
-					cancelled_links.append((df.fieldname, docname, get_msg(df, docname)))
+						cancelled_links.append((df.fieldname, docname, get_msg(df, docname)))
 
 		return invalid_links, cancelled_links
 
@@ -537,7 +521,7 @@ class BaseDocument(object):
 		if frappe.flags.in_import or self.is_new() or self.flags.ignore_validate_constants:
 			return
 
-		constants = [d.fieldname for d in self.meta.get("fields", {"set_only_once": 1})]
+		constants = [d.fieldname for d in self.meta.get("fields", {"set_only_once": ('=',1)})]
 		if constants:
 			values = frappe.db.get_value(self.doctype, self.name, constants, as_dict=True)
 
@@ -559,7 +543,11 @@ class BaseDocument(object):
 		if frappe.flags.in_install:
 			return
 
-		for fieldname, value in self.get_valid_dict().iteritems():
+		if self.meta.issingle:
+			# single doctype value type is mediumtext
+			return
+
+		for fieldname, value in iteritems(self.get_valid_dict()):
 			df = self.meta.get_field(fieldname)
 			if df and df.fieldtype in type_map and type_map[df.fieldtype][0]=="varchar":
 				max_length = cint(df.get("length")) or cint(varchar_len)
@@ -605,10 +593,12 @@ class BaseDocument(object):
 			return
 
 		for fieldname, value in self.get_valid_dict().items():
-			if not value or not isinstance(value, basestring):
+			if not value or not isinstance(value, string_types):
 				continue
 
-			elif (u"<" not in value and u">" not in value):
+			value = frappe.as_unicode(value)
+
+			if (u"<" not in value and u">" not in value):
 				# doesn't look like html so no need
 				continue
 
@@ -638,10 +628,11 @@ class BaseDocument(object):
 
 	def _save_passwords(self):
 		'''Save password field values in __Auth table'''
-		if self.flags.ignore_save_passwords:
+		if self.flags.ignore_save_passwords is True:
 			return
 
-		for df in self.meta.get('fields', {'fieldtype': 'Password'}):
+		for df in self.meta.get('fields', {'fieldtype': ('=', 'Password')}):
+			if self.flags.ignore_save_passwords and df.fieldname in self.flags.ignore_save_passwords: continue
 			new_password = self.get(df.fieldname)
 			if new_password and not self.is_dummy_password(new_password):
 				# is not a dummy password like '*****'
@@ -666,7 +657,7 @@ class BaseDocument(object):
 		:param parentfield: If fieldname is in child table."""
 		from frappe.model.meta import get_field_precision
 
-		if parentfield and not isinstance(parentfield, basestring):
+		if parentfield and not isinstance(parentfield, string_types):
 			parentfield = parentfield.parentfield
 
 		cache_key = parentfield or "main"
@@ -778,32 +769,13 @@ class BaseDocument(object):
 
 		return self.cast(val, df)
 
-	def cast(self, val, df):
-		if df.fieldtype in ("Currency", "Float", "Percent"):
-			val = flt(val)
-
-		elif df.fieldtype in ("Int", "Check"):
-			val = cint(val)
-
-		elif df.fieldtype in ("Data", "Text", "Small Text", "Long Text",
-			"Text Editor", "Select", "Link", "Dynamic Link"):
-				val = cstr(val)
-
-		elif df.fieldtype == "Date":
-			val = getdate(val)
-
-		elif df.fieldtype == "Datetime":
-			val = get_datetime(val)
-
-		elif df.fieldtype == "Time":
-			val = to_timedelta(val)
-
-		return val
+	def cast(self, value, df):
+		return cast_fieldtype(df.fieldtype, value)
 
 	def _extract_images_from_text_editor(self):
 		from frappe.utils.file_manager import extract_images_from_doc
 		if self.doctype != "DocType":
-			for df in self.meta.get("fields", {"fieldtype":"Text Editor"}):
+			for df in self.meta.get("fields", {"fieldtype": ('=', "Text Editor")}):
 				extract_images_from_doc(self, df.fieldname)
 
 def _filter(data, filters, limit=None):
@@ -812,23 +784,31 @@ def _filter(data, filters, limit=None):
 		"key": ["in", "val"], "key": ["not in", "val"], "key": "^val",
 		"key" : True (exists), "key": False (does not exist) }"""
 
-	out = []
+	out, _filters = [], {}
 
-	for d in data:
-		add = True
+	if not data:
+		return out
+
+	# setup filters as tuples
+	if filters:
 		for f in filters:
 			fval = filters[f]
 
-			if fval is True:
-				fval = ("not None", fval)
-			elif fval is False:
-				fval = ("None", fval)
-			elif not isinstance(fval, (tuple, list)):
-				if isinstance(fval, basestring) and fval.startswith("^"):
+			if not isinstance(fval, (tuple, list)):
+				if fval is True:
+					fval = ("not None", fval)
+				elif fval is False:
+					fval = ("None", fval)
+				elif isinstance(fval, string_types) and fval.startswith("^"):
 					fval = ("^", fval[1:])
 				else:
 					fval = ("=", fval)
 
+			_filters[f] = fval
+
+	for d in data:
+		add = True
+		for f, fval in iteritems(_filters):
 			if not frappe.compare(getattr(d, f, None), fval[0], fval[1]):
 				add = False
 				break

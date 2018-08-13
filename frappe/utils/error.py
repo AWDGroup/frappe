@@ -16,6 +16,7 @@ import cgitb
 import types
 import datetime
 import json
+import six
 
 def make_error_snapshot(exception):
 	if frappe.conf.disable_error_snapshot:
@@ -40,7 +41,7 @@ def make_error_snapshot(exception):
 
 		logger.error('New Exception collected with id: {}'.format(error_id))
 
-	except Exception, e:
+	except Exception as e:
 		logger.error('Could not take error snapshot: {0}'.format(e), exc_info=True)
 
 def get_snapshot(exception, context=10):
@@ -49,7 +50,7 @@ def get_snapshot(exception, context=10):
 	"""
 
 	etype, evalue, etb = sys.exc_info()
-	if isinstance(etype, types.ClassType):
+	if isinstance(etype, six.class_types):
 		etype = etype.__name__
 
 	# creates a snapshot dict with some basic information
@@ -64,7 +65,7 @@ def get_snapshot(exception, context=10):
 		'traceback': traceback.format_exc(),
 		'frames': [],
 		'etype': cstr(etype),
-		'evalue': cstr(`evalue`),
+		'evalue': cstr(repr(evalue)),
 		'exception': {},
 		'locals': {}
 	}
@@ -156,7 +157,7 @@ def collect_error_snapshots():
 			fullpath = os.path.join(path, fname)
 
 			try:
-				with open(fullpath, 'rb') as filedata:
+				with open(fullpath, 'r') as filedata:
 					data = json.load(filedata)
 
 			except ValueError:

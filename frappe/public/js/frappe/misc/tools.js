@@ -1,11 +1,13 @@
 // Copyright (c) 2015, Frappe Technologies Pvt. Ltd. and Contributors
 // MIT License. See license.txt
 
+import showdown from 'showdown';
+
 frappe.provide("frappe.tools");
 
 frappe.tools.downloadify = function(data, roles, title) {
-	if(roles && roles.length && !has_common(roles, user_roles)) {
-		msgprint(__("Export not allowed. You need {0} role to export.", [frappe.utils.comma_or(roles)]));
+	if(roles && roles.length && !has_common(roles, roles)) {
+		frappe.msgprint(__("Export not allowed. You need {0} role to export.", [frappe.utils.comma_or(roles)]));
 		return;
 	}
 
@@ -34,7 +36,7 @@ frappe.tools.downloadify = function(data, roles, title) {
 
 frappe.markdown = function(txt) {
 	if(!frappe.md2html) {
-		frappe.md2html = new Showdown.converter();
+		frappe.md2html = new showdown.Converter();
 	}
 
 	while(txt.substr(0,1)==="\n") {
@@ -66,7 +68,8 @@ frappe.tools.to_csv = function(data) {
 	var res = [];
 	$.each(data, function(i, row) {
 		row = $.map(row, function(col) {
-			return typeof(col)==="string" ? ('"' + col.replace(/"/g, '""') + '"') : col;
+			if (col === null || col === undefined) col = '';
+			return typeof col === "string" ? ('"' + $('<i>').html(col.replace(/"/g, '""')).text() + '"') : col;
 		});
 		res.push(row.join(","));
 	});
@@ -77,6 +80,14 @@ frappe.slickgrid_tools = {
 	get_filtered_items: function(dataView) {
 		var data = [];
 		for (var i=0, len=dataView.getLength(); i<len; i++) {
+			// remove single quotes at start and end of total labels when print/pdf
+			var obj = dataView.getItem(i);
+			for (var item in obj) {
+				if(obj.hasOwnProperty(item) && typeof(obj[item]) == "string"
+					&& obj[item].charAt(0) == "'" && obj[item].charAt(obj[item].length -1) == "'") {
+					dataView.getItem(i)[item] = obj[item].substr(1, obj[item].length-2);
+				}
+			}
 			data.push(dataView.getItem(i));
 		}
 		return data;
@@ -93,6 +104,16 @@ frappe.slickgrid_tools = {
 				var val = d[col];
 				if(val===null || val===undefined) {
 					val = "";
+				}
+				if(typeof(val) == "string") {
+					// export to csv and get first or second column of the grid indented if it is. e.g: account_name
+					if((i<3) && d['indent'] > 0 && (isNaN((new Date(val)).valueOf()))) {
+						val = " ".repeat(d['indent'] * 8) + val;
+					}
+					// remove single quotes at start and end of total labels when export to csv
+					if(val.charAt(0) == "'" && val.charAt(val.length -1) == "'") {
+						val = val.substr(1, val.length-2);
+					}
 				}
 				row.push(val);
 			});

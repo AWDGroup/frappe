@@ -1,9 +1,9 @@
-// Copyright (c) 2015, Frappe Technologies Pvt. Ltd. and Contributors
-// MIT License. See license.txt
+import './field_group';
+import '../dom';
 
 frappe.provide('frappe.ui');
 
-var cur_dialog;
+window.cur_dialog = null;
 
 frappe.ui.open_dialogs = [];
 frappe.ui.Dialog = frappe.ui.FieldGroup.extend({
@@ -11,14 +11,20 @@ frappe.ui.Dialog = frappe.ui.FieldGroup.extend({
 		this.display = false;
 		this.is_dialog = true;
 
-		$.extend(this, opts);
+		$.extend(this, { animate: true, size: null }, opts);
 		this._super();
 		this.make();
 	},
 	make: function() {
 		this.$wrapper = frappe.get_modal("", "");
+
 		this.wrapper = this.$wrapper.find('.modal-dialog')
 			.get(0);
+		if ( this.size == "small" )
+			$(this.wrapper).addClass("modal-sm");
+		else if ( this.size == "large" )
+			$(this.wrapper).addClass("modal-lg");
+
 		this.make_head();
 		this.body = this.$wrapper.find(".modal-body").get(0);
 		this.header = this.$wrapper.find(".modal-header");
@@ -27,12 +33,13 @@ frappe.ui.Dialog = frappe.ui.FieldGroup.extend({
 		this._super();
 
 		// show footer
-		if(this.primary_action) {
-			this.set_primary_action(this.primary_action_label || __("Submit"), this.primary_action);
+		this.action = this.action || { primary: { }, secondary: { } };
+		if(this.primary_action || this.action.primary) {
+			this.set_primary_action(this.primary_action_label || this.action.primary.label || __("Submit"), this.primary_action || this.action.primary.onsubmit);
 		}
 
-		if (this.secondary_action_label) {
-			this.get_close_btn().html(this.secondary_action_label);
+		if (this.secondary_action_label || this.action.secondary) {
+			this.get_close_btn().html(this.secondary_action_label || this.action.secondary.label);
 		}
 
 		var me = this;
@@ -42,31 +49,30 @@ frappe.ui.Dialog = frappe.ui.FieldGroup.extend({
 				if(frappe.ui.open_dialogs[frappe.ui.open_dialogs.length-1]===me) {
 					frappe.ui.open_dialogs.pop();
 					if(frappe.ui.open_dialogs.length) {
-						cur_dialog = frappe.ui.open_dialogs[frappe.ui.open_dialogs.length-1];
+						window.cur_dialog = frappe.ui.open_dialogs[frappe.ui.open_dialogs.length-1];
 					} else {
-						cur_dialog = null;
+						window.cur_dialog = null;
 					}
 				}
-				me.onhide && me.onhide.apply(me);
+				me.onhide && me.onhide();
+				me.on_hide && me.on_hide();
 			})
 			.on("shown.bs.modal", function() {
 				// focus on first input
 				me.display = true;
-				cur_dialog = me;
+				window.cur_dialog = me;
 				frappe.ui.open_dialogs.push(me);
 				me.focus_on_first_input();
 				me.on_page_show && me.on_page_show();
+			})
+			.on('scroll', function() {
+				var $input = $('input:focus');
+				if($input.length && ['Date', 'Datetime',
+					'Time'].includes($input.attr('data-fieldtype'))) {
+					$input.blur();
+				}
 			});
 
-	},
-	focus_on_first_input: function() {
-		if(this.no_focus) return;
-		$.each(this.fields_list, function(i, f) {
-			if(!in_list(['Date', 'Datetime', 'Time'], f.df.fieldtype) && f.set_focus) {
-				f.set_focus();
-				return false;
-			}
-		});
 	},
 	get_primary_btn: function() {
 		return this.$wrapper.find(".modal-header .btn-primary");
@@ -79,11 +85,21 @@ frappe.ui.Dialog = frappe.ui.FieldGroup.extend({
 			.html(label)
 			.click(function() {
 				me.primary_action_fulfilled = true;
-				click.apply(me);
+				// get values and send it
+				// as first parameter to click callback
+				// if no values then return
+				var values = me.get_values();
+				if(!values) return;
+				click && click.apply(me, [values]);
 			});
 	},
+	disable_primary_action: function() {
+		this.get_primary_btn().addClass('disabled');
+	},
+	enable_primary_action: function() {
+		this.get_primary_btn().removeClass('disabled');
+	},
 	make_head: function() {
-		var me = this;
 		this.set_title(this.title);
 	},
 	set_title: function(t) {
@@ -91,11 +107,18 @@ frappe.ui.Dialog = frappe.ui.FieldGroup.extend({
 	},
 	show: function() {
 		// show it
+		if ( this.animate ) {
+			this.$wrapper.addClass('fade');
+		} else {
+			this.$wrapper.removeClass('fade');
+		}
 		this.$wrapper.modal("show");
 		this.primary_action_fulfilled = false;
+		this.is_visible = true;
 	},
-	hide: function(from_event) {
+	hide: function() {
 		this.$wrapper.modal("hide");
+		this.is_visible = false;
 	},
 	get_close_btn: function() {
 		return this.$wrapper.find(".btn-modal-close");

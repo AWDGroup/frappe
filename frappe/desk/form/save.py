@@ -20,7 +20,7 @@ def savedocs(doc, action):
 		else:
 			try:
 				doc.save()
-			except frappe.NameError, e:
+			except frappe.NameError as e:
 				doctype, name, original_exception = e if isinstance(e, tuple) else (doc.doctype or "", doc.name or "", None)
 				frappe.msgprint(frappe._("{0} {1} already exists").format(doctype, name))
 				raise
@@ -51,7 +51,7 @@ def cancel(doctype=None, name=None, workflow_state_fieldname=None, workflow_stat
 		raise
 
 def send_updated_docs(doc):
-	from load import get_docinfo
+	from .load import get_docinfo
 	get_docinfo(doc)
 
 	d = doc.as_dict()
